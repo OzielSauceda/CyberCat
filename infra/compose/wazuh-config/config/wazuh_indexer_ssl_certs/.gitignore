@@ -1,0 +1,5 @@
+# Generated TLS certs — do not commit to version control.
+# Regenerate with:
+#   docker compose -f wazuh-config/generate-indexer-certs.yml run --rm generator
+*.pem
+*.key

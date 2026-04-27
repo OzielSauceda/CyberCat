@@ -1,0 +1,8 @@
+rules:
+  - proc_creation_win_powershell_encoded_cmd.yml
+  - proc_creation_win_office_spawn_shell.yml
+  - proc_creation_win_rundll32_registered.yml
+  - proc_creation_win_lolbin_certutil_download.yml
+  - proc_creation_win_lolbin_mshta_susp.yml
+  - logon_remote_explicit_credentials.yml
+  - network_connection_win_susp_outbound.yml

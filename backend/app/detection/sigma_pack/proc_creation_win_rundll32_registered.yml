@@ -1,0 +1,23 @@
+# Attribution: Adapted from SigmaHQ rule proc_creation_win_susp_rundll32_activity.yml
+# Original authors: Florian Roth (Nextron Systems), juju4, keepwatch
+# License: Detection Rule License (DRL) 1.1 — https://github.com/SigmaHQ/sigma/blob/master/LICENSE.Detection.Rules.md
+title: Suspicious Rundll32 Script Execution
+id: proc-creation-win-rundll32-script
+status: test
+description: Detects Rundll32 used to execute JavaScript or VBScript, a common LOLBin
+  abuse pattern for code execution without spawning obvious interpreters.
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection_image:
+    Image|endswith: \rundll32.exe
+  selection_script:
+    CommandLine|contains:
+      - javascript:
+      - vbscript:
+  condition: selection_image and selection_script
+level: high
+tags:
+  - attack.defense-evasion
+  - attack.t1218.011

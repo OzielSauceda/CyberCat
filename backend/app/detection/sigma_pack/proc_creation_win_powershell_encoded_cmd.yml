@@ -1,0 +1,28 @@
+# Attribution: Adapted from SigmaHQ rule proc_creation_win_powershell_encoded_cmd.yml
+# Original authors: Florian Roth (Nextron Systems), Markus Neis
+# License: Detection Rule License (DRL) 1.1 — https://github.com/SigmaHQ/sigma/blob/master/LICENSE.Detection.Rules.md
+title: PowerShell Encoded Command
+id: proc-creation-win-powershell-encoded-cmd
+status: test
+description: Detects PowerShell invocations that use encoded command flags, a common
+  technique to obfuscate malicious payloads.
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection_image:
+    Image|endswith:
+      - \powershell.exe
+      - \pwsh.exe
+  selection_enc:
+    CommandLine|contains:
+      - ' -enc '
+      - ' -EncodedCommand '
+      - ' -ec '
+      - ' -e '
+  condition: selection_image and selection_enc
+level: high
+tags:
+  - attack.execution
+  - attack.t1059.001
+  - attack.t1027.010

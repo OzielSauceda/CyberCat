@@ -1,0 +1,19 @@
+# Run this once before the first wazuh bring-up (from infra/compose/):
+#   docker compose -f wazuh-config/generate-indexer-certs.yml run --rm generator
+#
+# Outputs TLS certificates to ./config/wazuh_indexer_ssl_certs/:
+#   root-ca.pem, root-ca.key
+#   admin.pem, admin-key.pem
+#   wazuh-indexer.pem, wazuh-indexer-key.pem
+#   wazuh-manager.pem, wazuh-manager-key.pem
+#
+# Wazuh-indexer 4.9.x aborts at boot without these certs mounted.
+# Re-run only if you wipe wazuh_indexer_data volume (certs must stay in sync with the node identity).
+
+services:
+  generator:
+    image: wazuh/wazuh-certs-generator:0.0.2
+    hostname: wazuh-certs-generator
+    volumes:
+      - ./config/wazuh_indexer_ssl_certs/:/certificates/
+      - ./config/certs.yml:/config/certs.yml

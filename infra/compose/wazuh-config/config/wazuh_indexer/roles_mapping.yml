@@ -1,0 +1,40 @@
+---
+# Maps backend roles (from internal_users.yml) to OpenSearch Security roles.
+# cybercat_reader mapping is added in Phase 9B Sub-track 2.
+
+_meta:
+  type: "rolesmapping"
+  config_version: 2
+
+all_access:
+  reserved: false
+  backend_roles:
+    - "admin"
+  description: "Maps admin backend role to all_access"
+
+own_index:
+  reserved: false
+  users:
+    - "*"
+  description: "Allow full access to an index named like the username"
+
+readall:
+  reserved: false
+  backend_roles:
+    - "readall"
+
+manage_snapshots:
+  reserved: false
+  backend_roles:
+    - "snapshotrestore"
+
+kibana_server:
+  reserved: true
+  users:
+    - "kibanaserver"
+
+cybercat_reader:
+  reserved: false
+  users:
+    - "cybercat_reader"
+  description: "Maps cybercat_reader user to the cybercat_reader role"

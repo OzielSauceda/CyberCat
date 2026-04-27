@@ -1,0 +1,26 @@
+# Attribution: Adapted from SigmaHQ rule proc_creation_win_lolbin_certutil_download.yml
+# Original authors: Florian Roth (Nextron Systems), Christian Burkard (Nextron Systems)
+# License: Detection Rule License (DRL) 1.1 — https://github.com/SigmaHQ/sigma/blob/master/LICENSE.Detection.Rules.md
+title: Certutil Used for Download (LOLBin)
+id: proc-creation-win-lolbin-certutil-download
+status: test
+description: Detects Certutil invoked with URL-fetching flags, a well-known LOLBin
+  technique for downloading payloads without triggering browser/proxy alerts.
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection_image:
+    Image|endswith: \certutil.exe
+  selection_download:
+    CommandLine|contains:
+      - -urlcache
+      - -verifyctl
+      - -syncwithWU
+  condition: selection_image and selection_download
+level: medium
+tags:
+  - attack.command-and-control
+  - attack.t1105
+  - attack.defense-evasion
+  - attack.t1218

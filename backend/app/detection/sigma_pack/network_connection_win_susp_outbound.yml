@@ -1,0 +1,24 @@
+# Attribution: Adapted from SigmaHQ rule net_connection_win_susp_outbound.yml
+# Original authors: Florian Roth (Nextron Systems)
+# License: Detection Rule License (DRL) 1.1 — https://github.com/SigmaHQ/sigma/blob/master/LICENSE.Detection.Rules.md
+title: Suspicious Outbound Connection on Known C2 Ports
+id: network-connection-win-susp-outbound
+status: test
+description: Detects outbound network connections to ports commonly used by C2
+  frameworks and remote-access tools (4444, 5555, 8888, 1337, 31337).
+logsource:
+  category: network_connection
+  product: windows
+detection:
+  selection:
+    DestinationPort:
+      - "4444"
+      - "5555"
+      - "8888"
+      - "1337"
+      - "31337"
+  condition: selection
+level: medium
+tags:
+  - attack.command-and-control
+  - attack.t1571

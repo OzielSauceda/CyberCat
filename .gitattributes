@@ -1,0 +1,22 @@
+# Default: let git auto-detect text vs binary, normalize to LF in repo
+* text=auto eol=lf
+
+# Shell scripts must always be LF (would break in Linux containers otherwise)
+*.sh    text eol=lf
+*.bash  text eol=lf
+
+# Windows-only files
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+*.ps1   text eol=crlf
+
+# Binaries (don't normalize)
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.pdf   binary
+*.zip   binary
+*.gz    binary
+*.tar   binary

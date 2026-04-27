@@ -1,0 +1,16 @@
+nodes:
+  # Indexer nodes
+  indexer:
+    - name: wazuh-indexer
+      ip: 127.0.0.1
+
+  # Wazuh server nodes
+  server:
+    - name: wazuh-manager
+      ip: 127.0.0.1
+
+# Note: no dashboard node — CyberCat's Next.js frontend replaces the Wazuh dashboard.
+# Note: cert generator 0.0.2 rejects bare Docker service names as DNS values; 127.0.0.1 is used
+# instead. TLS hostname verification is disabled in opensearch.yml and FILEBEAT_SSL_VERIFICATION_MODE
+# so this has no functional impact for Sub-track 1. Sub-track 2 can regenerate if full hostname
+# verification is required.

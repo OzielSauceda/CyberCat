@@ -1,0 +1,32 @@
+{
+  "_id": "AX1234567890stuvwx",
+  "timestamp": "2026-04-23T12:00:00.000+0000",
+  "@timestamp": "2026-04-23T12:00:00.000+0000",
+  "rule": {
+    "id": "61100",
+    "level": 3,
+    "description": "Sysmon - Event 1: Process creation",
+    "groups": ["sysmon", "sysmon_eid1_detections"]
+  },
+  "agent": {
+    "id": "002",
+    "name": "lab-win10-01"
+  },
+  "data": {
+    "win": {
+      "system": {
+        "eventID": "1",
+        "computer": "lab-win10-01"
+      },
+      "eventdata": {
+        "image": "C:\\Windows\\System32\\cmd.exe",
+        "commandLine": "cmd.exe /c whoami",
+        "parentImage": "C:\\Windows\\explorer.exe",
+        "parentCommandLine": "explorer.exe",
+        "processId": "1234",
+        "parentProcessId": "5678",
+        "user": "LAB\\alice"
+      }
+    }
+  }
+}

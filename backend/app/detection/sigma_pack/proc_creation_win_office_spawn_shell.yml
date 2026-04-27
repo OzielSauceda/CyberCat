@@ -1,0 +1,35 @@
+# Attribution: Adapted from SigmaHQ rule proc_creation_win_office_spawn_shell.yml
+# Original authors: Florian Roth (Nextron Systems), Markus Neis, Elastic
+# License: Detection Rule License (DRL) 1.1 — https://github.com/SigmaHQ/sigma/blob/master/LICENSE.Detection.Rules.md
+title: Office Application Spawning Shell
+id: proc-creation-win-office-spawn-shell
+status: test
+description: Detects a Microsoft Office application spawning a shell or script interpreter,
+  a pattern consistent with macro-based or phishing-delivered execution.
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection_parent:
+    ParentImage|endswith:
+      - \winword.exe
+      - \excel.exe
+      - \outlook.exe
+      - \powerpnt.exe
+      - \onenote.exe
+      - \msaccess.exe
+  selection_child:
+    Image|endswith:
+      - \cmd.exe
+      - \powershell.exe
+      - \pwsh.exe
+      - \wscript.exe
+      - \cscript.exe
+      - \mshta.exe
+  condition: selection_parent and selection_child
+level: high
+tags:
+  - attack.execution
+  - attack.t1059.003
+  - attack.initial-access
+  - attack.t1566.001

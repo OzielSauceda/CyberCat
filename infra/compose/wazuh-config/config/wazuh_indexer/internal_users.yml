@@ -1,0 +1,25 @@
+---
+# Internal users for Wazuh Indexer (OpenSearch Security plugin).
+# The admin password hash is overridden at runtime by OPENSEARCH_INITIAL_ADMIN_PASSWORD.
+# cybercat_reader user is added in Phase 9B Sub-track 2.
+
+_meta:
+  type: "internalusers"
+  config_version: 2
+
+admin:
+  hash: "$2y$12$AzoTxz8aO5ESseLUc4Zp9.97rzaJxA1pwYNR36cwH3GmkTjrBc752"
+  reserved: true
+  backend_roles:
+    - "admin"
+  description: "Admin user — password: SecretPassword123! (bcrypt via hash.sh 2026-04-22)"
+
+kibanaserver:
+  hash: "$2a$12$4AcgAt3xwOWadA5s5blL6ev39OXDNhmOesEoo33eZtrte5Z.fTFn2"
+  reserved: true
+  description: "OpenSearch Dashboards user (unused — CyberCat has its own UI)"
+
+cybercat_reader:
+  hash: "$2y$12$3o07vEE8sR6c0tyAJ4sMHeIC6XLVlqRadALHqEk8h4eW6hgiNjleG"
+  reserved: false
+  description: "Read-only user for CyberCat backend poller — password: CyberCatR3ader! (bcrypt via hash.sh 2026-04-23)"

@@ -1,0 +1,25 @@
+# Attribution: Adapted from SigmaHQ rule proc_creation_win_lolbin_mshta_susp.yml
+# Original authors: Florian Roth (Nextron Systems), Markus Neis
+# License: Detection Rule License (DRL) 1.1 — https://github.com/SigmaHQ/sigma/blob/master/LICENSE.Detection.Rules.md
+title: MSHTA Executing Remote Script (LOLBin)
+id: proc-creation-win-lolbin-mshta-susp
+status: test
+description: Detects Mshta used to fetch and execute a remote script, a common LOLBin
+  technique that bypasses application allow-listing by living in a trusted Windows binary.
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection_image:
+    Image|endswith: \mshta.exe
+  selection_remote:
+    CommandLine|contains:
+      - http://
+      - https://
+      - ftp://
+  condition: selection_image and selection_remote
+level: high
+tags:
+  - attack.defense-evasion
+  - attack.t1218.005
+  - attack.execution

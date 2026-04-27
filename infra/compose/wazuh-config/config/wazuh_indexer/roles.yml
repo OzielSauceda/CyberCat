@@ -1,0 +1,22 @@
+---
+# Custom roles for Wazuh Indexer (OpenSearch Security plugin).
+# Built-in roles (all_access, readall, etc.) are provided by OpenSearch — no need to redefine.
+# cybercat_reader role (read-only on wazuh-alerts-*) is added in Phase 9B Sub-track 2.
+
+_meta:
+  type: "roles"
+  config_version: 2
+
+cybercat_reader:
+  reserved: false
+  description: "Read-only access to wazuh-alerts-* for the CyberCat backend poller"
+  cluster_permissions:
+    - "cluster:monitor/health"
+    - "cluster:monitor/state"
+    - "cluster:monitor/nodes/info"
+  index_permissions:
+    - index_patterns:
+        - "wazuh-alerts-*"
+      allowed_actions:
+        - "read"
+        - "search"

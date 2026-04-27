@@ -1,0 +1,185 @@
+services:
+
+  # ── Tier A: always-on core ───────────────────────────────────────────────
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: cybercat
+      POSTGRES_USER: cybercat
+      POSTGRES_PASSWORD: cybercat_dev
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cybercat -d cybercat"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ../../backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      APP_ENV: development
+      DATABASE_URL: postgresql+asyncpg://cybercat:cybercat_dev@postgres:5432/cybercat
+      REDIS_URL: redis://redis:6379/0
+      WAZUH_BRIDGE_ENABLED: ${WAZUH_BRIDGE_ENABLED:-false}
+      WAZUH_INDEXER_URL: ${WAZUH_INDEXER_URL:-https://wazuh-indexer:9200}
+      WAZUH_INDEXER_USER: ${WAZUH_INDEXER_USER:-cybercat_reader}
+      WAZUH_INDEXER_PASSWORD: ${WAZUH_INDEXER_PASSWORD:-CyberCatR3ader!}
+      WAZUH_INDEXER_VERIFY_TLS: ${WAZUH_INDEXER_VERIFY_TLS:-true}
+      WAZUH_CA_BUNDLE_PATH: ${WAZUH_CA_BUNDLE_PATH:-/etc/ssl/certs/wazuh-ca.pem}
+      WAZUH_AR_ENABLED: ${WAZUH_AR_ENABLED:-false}
+      WAZUH_MANAGER_URL: ${WAZUH_MANAGER_URL:-https://wazuh-manager:55000}
+      WAZUH_MANAGER_USER: ${WAZUH_MANAGER_USER:-wazuh-wui}
+      WAZUH_MANAGER_PASSWORD: ${WAZUH_MANAGER_PASSWORD:-}
+      AUTH_REQUIRED: ${AUTH_REQUIRED:-false}
+      AUTH_COOKIE_SECRET: ${AUTH_COOKIE_SECRET:-}
+    volumes:
+      - ./wazuh-config/config/wazuh_indexer_ssl_certs/root-ca.pem:/etc/ssl/certs/wazuh-ca.pem:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ../../frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  # ── Tier B: on-demand (--profile wazuh) ──────────────────────────────────
+  # Start with: docker compose --profile wazuh up -d
+  # Stop with:  docker compose --profile wazuh down
+  # See docs/decisions/ADR-0004-wazuh-bridge.md for bridge mechanism rationale.
+  # Note: wazuh-dashboard is deliberately omitted — CyberCat UI replaces it.
+
+  # Run once before first bring-up to generate TLS certs:
+  #   docker compose -f wazuh-config/generate-indexer-certs.yml run --rm generator
+  # Certs land in wazuh-config/config/wazuh_indexer_ssl_certs/ — indexer won't boot without them.
+  wazuh-indexer:
+    image: wazuh/wazuh-indexer:4.9.2
+    profiles: [wazuh]
+    environment:
+      - "OPENSEARCH_JAVA_OPTS=-Xms1g -Xmx1g"
+      - discovery.type=single-node
+      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=${WAZUH_INDEXER_PASSWORD:-SecretPassword123!}
+    volumes:
+      - wazuh_indexer_data:/var/lib/wazuh-indexer
+      - ./wazuh-config/config/wazuh_indexer_ssl_certs/root-ca.pem:/usr/share/wazuh-indexer/certs/root-ca.pem:ro
+      - ./wazuh-config/config/wazuh_indexer_ssl_certs/wazuh-indexer-key.pem:/usr/share/wazuh-indexer/certs/indexer-key.pem:ro
+      - ./wazuh-config/config/wazuh_indexer_ssl_certs/wazuh-indexer.pem:/usr/share/wazuh-indexer/certs/indexer.pem:ro
+      - ./wazuh-config/config/wazuh_indexer_ssl_certs/admin.pem:/usr/share/wazuh-indexer/certs/admin.pem:ro
+      - ./wazuh-config/config/wazuh_indexer_ssl_certs/admin-key.pem:/usr/share/wazuh-indexer/certs/admin-key.pem:ro
+      - ./wazuh-config/config/wazuh_indexer/wazuh.indexer.yml:/usr/share/wazuh-indexer/opensearch.yml:ro
+      # internal_users.yml is bind-mounted for securityadmin bootstrapping of passwords.
+      # roles.yml/roles_mapping.yml are NOT bind-mounted — they'd wipe built-in roles if
+      # securityadmin -cd is run. cybercat_reader role+mapping live in wazuh_indexer_data
+      # volume (created via REST API on first bring-up — see runbook Step 5).
+      - ./wazuh-config/config/wazuh_indexer/internal_users.yml:/usr/share/wazuh-indexer/opensearch-security/internal_users.yml:ro
+    ports:
+      - "9200:9200"
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - "curl -sk -u admin:${WAZUH_INDEXER_PASSWORD:-SecretPassword123!} https://localhost:9200/_cluster/health | grep -qE '(green|yellow)'"
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 60s
+    restart: unless-stopped
+
+  wazuh-manager:
+    image: wazuh/wazuh-manager:4.9.2
+    profiles: [wazuh]
+    environment:
+      - INDEXER_URL=https://wazuh-indexer:9200
+      - INDEXER_USERNAME=admin
+      - INDEXER_PASSWORD=${WAZUH_INDEXER_PASSWORD:-SecretPassword123!}
+      # "certificate" verifies the cert is signed by our CA but skips hostname check.
+      # "full" would require certs.yml to have dns: wazuh-indexer SAN — not generated yet.
+      - FILEBEAT_SSL_VERIFICATION_MODE=certificate
+      - SSL_CERTIFICATE_AUTHORITIES=/etc/ssl/root-ca.pem
+      - SSL_CERTIFICATE=/etc/ssl/filebeat.pem
+      - SSL_KEY=/etc/ssl/filebeat-key.pem
+    volumes:
+      - wazuh_manager_config:/var/ossec/etc
+      - wazuh_manager_logs:/var/ossec/logs
+      # Mount certs outside /etc/filebeat/ so the image's init can restore filebeat.yml.
+      # When /etc/filebeat has any child bind-mount, 0-wazuh-init treats the volume as
+      # "already mounted" and skips copying the backup filebeat.yml → init fails.
+      - ./wazuh-config/config/wazuh_indexer_ssl_certs/root-ca.pem:/etc/ssl/root-ca.pem:ro
+      - ./wazuh-config/config/wazuh_indexer_ssl_certs/wazuh-manager.pem:/etc/ssl/filebeat.pem:ro
+      - ./wazuh-config/config/wazuh_indexer_ssl_certs/wazuh-manager-key.pem:/etc/ssl/filebeat-key.pem:ro
+      - ./wazuh-config/config/wazuh_cluster/wazuh_manager.conf:/wazuh-config-mount/etc/ossec.conf:ro
+    ports:
+      - "1514:1514/udp"
+      - "1515:1515"
+      - "55000:55000"
+    depends_on:
+      wazuh-indexer:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "/var/ossec/bin/agent_control -l 2>/dev/null | grep -q 'Wazuh agent'  || curl -sk https://localhost:55000/security/user/authenticate -u wazuh-wui:MyS3cr37P450r* | grep -q token || true"]
+      interval: 20s
+      timeout: 10s
+      retries: 15
+      start_period: 90s
+    restart: unless-stopped
+
+  lab-debian:
+    build:
+      context: ../../infra/lab-debian
+      dockerfile: Dockerfile
+      args:
+        REALUSER_PASSWORD: ${LAB_REALUSER_PASSWORD:-lab123}
+    hostname: lab-debian
+    profiles: [wazuh]
+    environment:
+      - WAZUH_MANAGER=wazuh-manager
+      - WAZUH_REGISTRATION_PASSWORD=${WAZUH_REGISTRATION_PASSWORD:-}
+    cap_add:
+      - AUDIT_WRITE
+      - AUDIT_CONTROL
+      - NET_ADMIN
+    depends_on:
+      wazuh-manager:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep sshd && pgrep wazuh-agentd"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  wazuh_indexer_data:
+  wazuh_manager_config:
+  wazuh_manager_logs:

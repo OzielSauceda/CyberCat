@@ -1,0 +1,25 @@
+{
+  "_id": "AX1234567890mnopqr",
+  "timestamp": "2026-04-21T10:06:00.000+0000",
+  "@timestamp": "2026-04-21T10:06:00.000+0000",
+  "rule": {
+    "id": "80784",
+    "level": 3,
+    "description": "Audit: Command: /usr/bin/id",
+    "groups": ["audit", "audit_command"]
+  },
+  "agent": {
+    "id": "001",
+    "name": "lab-debian"
+  },
+  "data": {
+    "audit": {
+      "type": "EXECVE",
+      "pid": "1234",
+      "ppid": "1100",
+      "exe": "/usr/bin/id",
+      "auid": "1000",
+      "a0": "/usr/bin/id"
+    }
+  }
+}
