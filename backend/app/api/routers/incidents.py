@@ -24,6 +24,7 @@ from app.api.schemas.incidents import (
     IncidentSummary,
     NoteIn,
     NoteRef,
+    RecommendedActionOut,
     TimelineEvent,
     TransitionIn,
     TransitionOut,
@@ -45,7 +46,8 @@ from app.db.models import (
     Note,
 )
 from app.db.session import get_db
-from app.enums import IncidentStatus, Severity
+from app.enums import IncidentEntityRole, IncidentStatus, Severity
+from app.response.recommendations import recommend_for_incident
 
 _ALLOWED_TRANSITIONS: dict[IncidentStatus, set[IncidentStatus]] = {
     IncidentStatus.new: {IncidentStatus.triaged, IncidentStatus.closed},
@@ -501,3 +503,53 @@ async def add_note(
     await db.refresh(note)
 
     return NoteRef(id=note.id, body=note.body, author=note.author, created_at=note.created_at, actor_user_id=note.actor_user_id)
+
+
+@router.get(
+    "/{incident_id}/recommended-actions",
+    response_model=list[RecommendedActionOut],
+    responses={404: {"model": ErrorEnvelope}},
+)
+async def get_recommended_actions(
+    incident_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _user: User | SystemUser = Depends(require_user),
+) -> list[RecommendedActionOut]:
+    inc = await db.get(Incident, incident_id)
+    if inc is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": {"code": "not_found", "message": "Incident not found"}},
+        )
+
+    ent_result = await db.execute(
+        select(Entity, IncidentEntity.role)
+        .join(IncidentEntity, IncidentEntity.entity_id == Entity.id)
+        .where(IncidentEntity.incident_id == incident_id)
+    )
+    entities = [(e, IncidentEntityRole(role.value)) for e, role in ent_result.all()]
+
+    attack_result = await db.execute(
+        select(IncidentAttack).where(IncidentAttack.incident_id == incident_id)
+    )
+    attack = list(attack_result.scalars().all())
+
+    action_result = await db.execute(
+        select(Action).where(Action.incident_id == incident_id)
+    )
+    actions = list(action_result.scalars().all())
+
+    recs = recommend_for_incident(inc, entities, attack, actions)
+
+    return [
+        RecommendedActionOut(
+            kind=r.kind,
+            params=r.params,
+            rationale=r.rationale,
+            classification=r.classification,
+            classification_reason=r.classification_reason,
+            priority=r.priority,
+            target_summary=r.target_summary,
+        )
+        for r in recs
+    ]

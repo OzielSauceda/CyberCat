@@ -8,6 +8,8 @@ from typing import Literal
 from pydantic import BaseModel
 
 from app.enums import (
+    ActionClassification,
+    ActionKind,
     EntityKind,
     IncidentKind,
     IncidentStatus,
@@ -126,6 +128,16 @@ class TransitionOut(BaseModel):
 
 class NoteIn(BaseModel):
     body: str
+
+
+class RecommendedActionOut(BaseModel):
+    kind: ActionKind
+    params: dict
+    rationale: str
+    classification: ActionClassification
+    classification_reason: str
+    priority: int
+    target_summary: str
 
 
 class IncidentDetail(BaseModel):

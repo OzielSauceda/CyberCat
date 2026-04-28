@@ -2,13 +2,13 @@
 
 Living status document. Update as reality changes. Short, current, honest.
 
-Last updated: 2026-04-28 — Phase 14 FULLY VERIFIED. All 8 smoke scripts pass with both `AUTH_REQUIRED=false` (no token) and `AUTH_REQUIRED=true` (Bearer token). `pytest` 156/156 ✅. `npm run typecheck` 0 errors ✅. Browser: analyst login + SSE + read_only disabled buttons verified (14.2). Phases 1–14 all complete and verified.
+Last updated: 2026-04-28 — Phase 15.1 complete. Recommender engine + `GET /v1/incidents/{id}/recommended-actions` endpoint shipped. `pytest` 173/173 ✅. Phases 1–14 fully verified; Phase 15.1 backend verified.
 
 ---
 
 ## Status summary
 
-**Phase:** Phase 14 ✅ FULLY VERIFIED (2026-04-28). All sub-phases 14.1–14.5 complete and stack-verified. All 8 smoke scripts pass with and without auth token. 156/156 pytest passing. 0 typecheck errors. `infra/compose/.env` reset to `AUTH_REQUIRED=false` (dev default). The platform is now multi-operator capable.
+**Phase:** Phase 15 🔄 IN PROGRESS. Sub-phase 15.1 (backend recommender + endpoint) complete and test-verified 2026-04-28. Sub-phases 15.2 (frontend plumbing), 15.3 (RecommendedActionsPanel), 15.4 (smoke + docs) pending. Phase 14 ✅ FULLY VERIFIED.
 
 **Overall posture (honest):**
 
@@ -24,13 +24,35 @@ Last updated: 2026-04-28 — Phase 14 FULLY VERIFIED. All 8 smoke scripts pass w
 
 ## What needs to happen next session (pick up here)
 
-**Phase 14 is fully complete.** All 8 smoke scripts pass, 156/156 tests green, 0 typecheck errors.
+**Phase 15.1 is complete.** Backend recommender engine + endpoint verified. 173/173 tests green.
 
-Next up: **Ship-story phase** — README rewrite, demo GIF of `credential_theft_chain`, public repo prep. See the deferred plan details in the Known gaps section below.
+Next up: **Phase 15.2** — frontend plumbing: add `getRecommendedActions()` to `api.ts`, add `prefill` prop to `ProposeActionModal`. Then 15.3 (RecommendedActionsPanel + page integration), then 15.4 (smoke script + PROJECT_STATE update). See `docs/phase-15-plan.md`.
 
 ---
 
 ## Phase-by-phase state
+
+### Phase 15.1 — ✅ Backend Recommender + Endpoint — implemented and test-verified 2026-04-28
+
+**What Phase 15.1 does:** Adds a pure recommender engine that takes a loaded incident and returns up to 4 ranked, pre-filled `RecommendedAction` suggestions. Each suggestion has the correct `kind`, `params`, `rationale`, `classification`, `classification_reason`, `priority`, and `target_summary` — everything the frontend needs to pre-populate `ProposeActionModal` in one click. Exposed as a read-only `GET /v1/incidents/{id}/recommended-actions` endpoint (no auth mutation required).
+
+**New files:**
+- `backend/app/response/recommendations.py` — Two-level static mapping engine: Level 1 (incident kind → base candidate list), Level 2 (ATT&CK technique prefix → priority boost). Entity bucketing by incident role (user/host/source_ip/observable), already-executed filter with correct equivalence semantics for `block_observable` (value-key only, not full params), rationale templating, `classify()` integration. Excluded kinds: `tag_incident`, `elevate_severity`, `kill_process_lab`.
+- `backend/tests/unit/test_recommendations.py` — 13 pure unit tests (no DB/async required): empty entities, each incident kind, technique boosts, T1110.003 subtechnique inheritance, already-executed filter, reverted re-eligibility, excluded kinds, priority ranking, max_results cap.
+- `backend/tests/integration/test_recommendations_endpoint.py` — 4 integration tests: 401 anonymous, 200 read_only, 404 unknown id, real incident shape + sorted priorities + block_observable on 203.0.113.42 ranked first.
+
+**Modified files:**
+- `backend/app/api/schemas/incidents.py` — Added `RecommendedActionOut(BaseModel)` with 7 fields; added `ActionKind`, `ActionClassification` imports.
+- `backend/app/api/routers/incidents.py` — Added `GET /v1/incidents/{incident_id}/recommended-actions` endpoint: `require_user` (read-only), inline entity/attack/action loads, calls `recommend_for_incident()`, 404 on unknown id.
+
+**Verification (2026-04-28):**
+- `pytest tests/unit/test_recommendations.py` → **13/13** ✅
+- `pytest tests/integration/test_recommendations_endpoint.py` → **4/4** ✅
+- `pytest` full suite → **173/173** ✅ (no regressions; 17 new tests vs 156 baseline)
+- Live curl on running `endpoint_compromise` incident → 3 ranked recommendations returned with correct rationale, `quarantine_host_lab` ranked #1 (boosted by T1059 technique on that incident) ✅
+- `credential_theft_chain` end-to-end smoke (fire scenario + assert 4 recs + assert filter on execute + assert revert restores) deferred to Phase 15.4 smoke script
+
+---
 
 ### Phase 14.4 — ✅ OIDC Opt-in — implemented and test-verified 2026-04-27
 
