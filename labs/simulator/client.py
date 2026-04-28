@@ -10,13 +10,15 @@ log = logging.getLogger(__name__)
 
 
 class SimulatorClient:
-    def __init__(self, base_url: str, timeout: float = 15.0) -> None:
+    def __init__(self, base_url: str, timeout: float = 15.0, token: str | None = None) -> None:
         self._base = base_url.rstrip("/")
         self._timeout = timeout
+        self._token = token
         self._client: httpx.AsyncClient | None = None
 
     async def __aenter__(self) -> "SimulatorClient":
-        self._client = httpx.AsyncClient(base_url=self._base, timeout=self._timeout)
+        headers = {"Authorization": f"Bearer {self._token}"} if self._token else {}
+        self._client = httpx.AsyncClient(base_url=self._base, timeout=self._timeout, headers=headers)
         return self
 
     async def __aexit__(self, *_: Any) -> None:

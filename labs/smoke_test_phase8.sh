@@ -13,6 +13,9 @@ INDEXER_URL="https://localhost:9200"
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 PASS_COUNT=0; FAIL_COUNT=0
 
+[ -f "${SCRIPT_DIR}/.smoke-env" ] && source "${SCRIPT_DIR}/.smoke-env" || true
+[ -n "${SMOKE_API_TOKEN:-}" ] && AUTH_HEADER=(-H "Authorization: Bearer $SMOKE_API_TOKEN") || AUTH_HEADER=()
+
 check() {
   local n="$1"; local desc="$2"; shift 2
   if eval "$@" >/dev/null 2>&1; then
@@ -42,8 +45,9 @@ check 23 "Indexer cluster health green/yellow" \
   "curl -sk -u admin:${INDEXER_PASS} ${INDEXER_URL}/_cluster/health | grep -E '(green|yellow)'"
 
 # 24. Bridge enabled in CyberCat status endpoint
+_WAZUH_STATUS=$(curl -sf "${AUTH_HEADER[@]}" "${BASE_URL}/v1/wazuh/status" 2>/dev/null || echo '{}')
 check 24 "/v1/wazuh/status.enabled == true" \
-  "curl -sf ${BASE_URL}/v1/wazuh/status | python3 -c \"import sys,json; d=json.load(sys.stdin); assert d['enabled']==True\""
+  "echo '${_WAZUH_STATUS}' | python3 -c \"import sys,json; d=json.load(sys.stdin); assert d.get('enabled')==True\""
 
 # Reset counter so check 25 measures delta from this point, not a stale total.
 echo "  Resetting wazuh_cursor counter baseline..."
@@ -76,18 +80,18 @@ $COMPOSE --profile wazuh exec -T lab-debian bash -c '
 echo "  Waiting 30s for events to propagate and correlate..."
 sleep 30
 
-INGESTED=$(curl -sf "${BASE_URL}/v1/wazuh/status" | python3 -c "import sys,json; print(json.load(sys.stdin)['events_ingested_total'])" 2>/dev/null || echo "0")
+INGESTED=$(curl -sf "${AUTH_HEADER[@]}" "${BASE_URL}/v1/wazuh/status" | python3 -c "import sys,json; print(json.load(sys.stdin)['events_ingested_total'])" 2>/dev/null || echo "0")
 check 25 "events_ingested_total advanced since reset (got ${INGESTED})" \
   "[ '${INGESTED}' -gt 0 ]"
 
-AUTH_FAILED_COUNT=$(curl -sf "${BASE_URL}/v1/events?source=wazuh&kind=auth.failed" 2>/dev/null | python3 -c "import sys,json; data=json.load(sys.stdin); print(len(data.get('items', [])))" 2>/dev/null || echo "0")
+AUTH_FAILED_COUNT=$(curl -sf "${AUTH_HEADER[@]}" "${BASE_URL}/v1/events?source=wazuh&kind=auth.failed" 2>/dev/null | python3 -c "import sys,json; data=json.load(sys.stdin); print(len(data.get('items', [])))" 2>/dev/null || echo "0")
 check 26 ">=1 auth.failed events with source=wazuh (got ${AUTH_FAILED_COUNT})" \
   "[ '${AUTH_FAILED_COUNT}' -ge 1 ]"
 
 # 27. identity_compromise incident created with wazuh-sourced events.
 # Requires: 4+ auth.failed (burst detection) + auth.succeeded (anomalous source)
 # for the same user → identity_compromise correlator fires.
-INCIDENT_JSON=$(curl -sf "${BASE_URL}/v1/incidents?kind=identity_compromise" 2>/dev/null || echo '{"items":[]}')
+INCIDENT_JSON=$(curl -sf "${AUTH_HEADER[@]}" "${BASE_URL}/v1/incidents?kind=identity_compromise" 2>/dev/null || echo '{"items":[]}')
 INCIDENT_COUNT=$(echo "${INCIDENT_JSON}" | python3 -c "import sys,json; print(len(json.load(sys.stdin).get('items', [])))" 2>/dev/null || echo "0")
 check 27 "identity_compromise incident present (got ${INCIDENT_COUNT})" \
   "[ '${INCIDENT_COUNT}' -ge 1 ]"

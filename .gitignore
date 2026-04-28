@@ -48,6 +48,7 @@ Thumbs.db
 # Project-specific secrets
 backend/.env
 infra/compose/.env
+labs/.smoke-env
 
 # Next.js local env overrides (per Next.js convention)
 .env.local

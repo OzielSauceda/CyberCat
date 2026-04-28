@@ -41,6 +41,11 @@ def _parse() -> argparse.Namespace:
         action="store_false",
         help="Skip post-scenario outcome verification",
     )
+    p.add_argument(
+        "--token",
+        default=None,
+        help="Bearer token for AUTH_REQUIRED=true mode (cct_... value from cli issue-token)",
+    )
     return p.parse_args()
 
 
@@ -64,7 +69,7 @@ async def _run() -> int:
         f"api={args.api}  speed={args.speed}"
     )
 
-    async with SimulatorClient(base_url=args.api) as client:
+    async with SimulatorClient(base_url=args.api, token=args.token) as client:
         if not await client.healthz():
             print(f"ERROR: backend not reachable at {args.api}/healthz")
             return 1

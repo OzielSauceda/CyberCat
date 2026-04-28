@@ -1,0 +1,6 @@
+# Copy to labs/.smoke-env and fill in your API token.
+# This file is sourced by all smoke scripts before curl calls.
+# Leave SMOKE_API_TOKEN empty (or omit this file) when AUTH_REQUIRED=false.
+
+# Create a token via: python -m backend.app.auth.cli create-token <admin-email> --label smoke
+SMOKE_API_TOKEN=

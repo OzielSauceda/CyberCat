@@ -23,11 +23,11 @@ _ATTACKER_IP = "203.0.113.42"
 _WORKSTATION_IP = "10.0.0.50"
 
 # Real-time offsets (seconds). Compressed by --speed factor.
-_STAGE2_OFFSET = 60.0   # brute force → successful login
-_STAGE3_OFFSET = 75.0   # → session starts
-_STAGE4_OFFSET = 180.0  # → suspicious process (triggers chain)
-_STAGE5A_OFFSET = 240.0 # → net use lateral movement
-_STAGE5B_OFFSET = 250.0 # → C2 beacon outbound
+_STAGE2_OFFSET = 60.0   # brute force -> successful login
+_STAGE3_OFFSET = 75.0   # -> session starts
+_STAGE4_OFFSET = 180.0  # -> suspicious process (triggers chain)
+_STAGE5A_OFFSET = 240.0 # -> net use lateral movement
+_STAGE5B_OFFSET = 250.0 # -> C2 beacon outbound
 
 
 def _log(msg: str) -> None:
@@ -63,7 +63,7 @@ async def run(client: SimulatorClient, speed: float = 1.0) -> dict:
 
     # --- Stage 2: Successful login from attacker IP ---
     pause = wait(0.0, _STAGE2_OFFSET)
-    _log(f"  → waiting {pause:.1f}s before stage 2...")
+    _log(f"  -> waiting {pause:.1f}s before stage 2...")
     await asyncio.sleep(pause)
 
     _log(f"Stage 2  Successful login: auth.succeeded for {_USER} from {_ATTACKER_IP}")
@@ -77,11 +77,11 @@ async def run(client: SimulatorClient, speed: float = 1.0) -> dict:
     )
     _record(results, ev)
     if ev.get("incident_touched"):
-        _log(f"  → identity_compromise: {ev['incident_touched']}")
+        _log(f"  -> identity_compromise: {ev['incident_touched']}")
 
     # --- Stage 3: Session starts on workstation ---
     pause = wait(_STAGE2_OFFSET, _STAGE3_OFFSET)
-    _log(f"  → waiting {pause:.1f}s before stage 3...")
+    _log(f"  -> waiting {pause:.1f}s before stage 3...")
     await asyncio.sleep(pause)
 
     _log(f"Stage 3  Session started: {_USER} @ {_HOST}")
@@ -97,7 +97,7 @@ async def run(client: SimulatorClient, speed: float = 1.0) -> dict:
 
     # --- Stage 4: Suspicious encoded PowerShell (triggers chain) ---
     pause = wait(_STAGE3_OFFSET, _STAGE4_OFFSET)
-    _log(f"  → waiting {pause:.1f}s before stage 4...")
+    _log(f"  -> waiting {pause:.1f}s before stage 4...")
     await asyncio.sleep(pause)
 
     _log(f"Stage 4  Suspicious process: encoded PowerShell on {_HOST} as {_USER}")
@@ -114,11 +114,11 @@ async def run(client: SimulatorClient, speed: float = 1.0) -> dict:
     )
     _record(results, ev)
     if ev.get("incident_touched"):
-        _log(f"  → identity_endpoint_chain: {ev['incident_touched']}")
+        _log(f"  -> identity_endpoint_chain: {ev['incident_touched']}")
 
     # --- Stage 5a: net use (lateral movement signal) ---
     pause = wait(_STAGE4_OFFSET, _STAGE5A_OFFSET)
-    _log(f"  → waiting {pause:.1f}s before stage 5a...")
+    _log(f"  -> waiting {pause:.1f}s before stage 5a...")
     await asyncio.sleep(pause)
 
     _log(f"Stage 5a Post-exploit: net use on {_HOST}")
@@ -137,7 +137,7 @@ async def run(client: SimulatorClient, speed: float = 1.0) -> dict:
 
     # --- Stage 5b: C2 beacon outbound ---
     pause = wait(_STAGE5A_OFFSET, _STAGE5B_OFFSET)
-    _log(f"  → waiting {pause:.1f}s before stage 5b...")
+    _log(f"  -> waiting {pause:.1f}s before stage 5b...")
     await asyncio.sleep(pause)
 
     _log(f"Stage 5b C2 beacon: outbound TCP from {_HOST} to {_ATTACKER_IP}:4444")

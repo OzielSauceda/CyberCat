@@ -14,6 +14,9 @@ COMPOSE="docker compose -f infra/compose/docker-compose.yml --profile wazuh"
 PASS=0
 FAIL=0
 
+[ -f "labs/.smoke-env" ] && source "labs/.smoke-env" || true
+[ -n "${SMOKE_API_TOKEN:-}" ] && AUTH_HEADER=(-H "Authorization: Bearer $SMOKE_API_TOKEN") || AUTH_HEADER=()
+
 info()  { echo "[INFO]  $*"; }
 ok()    { echo "[PASS]  $*"; PASS=$((PASS+1)); }
 fail()  { echo "[FAIL]  $*"; FAIL=$((FAIL+1)); }
@@ -38,22 +41,22 @@ if [[ "${1:-}" == "--test-negative" ]]; then
     info "Stopping wazuh-manager for negative path test..."
     $COMPOSE stop wazuh-manager
 
-    r=$(curl -sf -X POST "$API/v1/lab/assets" \
+    r=$(curl -sf "${AUTH_HEADER[@]}" -X POST "$API/v1/lab/assets" \
         -H "Content-Type: application/json" \
         -d '{"kind":"host","natural_key":"lab-debian"}' 2>/dev/null || true)
 
-    inc_id=$(curl -sf -X POST "$API/v1/events/raw" \
+    inc_id=$(curl -sf "${AUTH_HEADER[@]}" -X POST "$API/v1/events/raw" \
         -H "Content-Type: application/json" \
         -d '{"source":"seeder","kind":"auth.failed","occurred_at":"2026-04-23T09:00:00Z","raw":{},"normalized":{"user":"alice","source_ip":"1.2.3.4","auth_type":"ssh"},"dedupe_key":"neg-fail-1"}' 2>/dev/null | \
         python3 -c "import sys,json; print('ok')" && \
-        curl -sf "$API/v1/incidents?limit=1" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['items'][0]['id'])")
+        curl -sf "${AUTH_HEADER[@]}" "$API/v1/incidents?limit=1" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['items'][0]['id'])")
 
-    prop=$(curl -sf -X POST "$API/v1/responses" \
+    prop=$(curl -sf "${AUTH_HEADER[@]}" -X POST "$API/v1/responses" \
         -H "Content-Type: application/json" \
         -d "{\"incident_id\":\"$inc_id\",\"kind\":\"quarantine_host_lab\",\"params\":{\"host\":\"lab-debian\"}}")
     action_id=$(echo "$prop" | python3 -c "import sys,json; print(json.load(sys.stdin)['action']['id'])")
 
-    exec_r=$(curl -sf -X POST "$API/v1/responses/$action_id/execute")
+    exec_r=$(curl -sf "${AUTH_HEADER[@]}" -X POST "$API/v1/responses/$action_id/execute")
     status=$(echo "$exec_r" | python3 -c "import sys,json; print(json.load(sys.stdin)['action']['status'])")
     check "$status" "partial" "negative: action.status is partial when manager down"
 
@@ -129,34 +132,34 @@ else
 fi
 
 # 2. Register lab-debian as a lab asset
-curl -sf -X POST "$API/v1/lab/assets" \
+curl -sf "${AUTH_HEADER[@]}" -X POST "$API/v1/lab/assets" \
     -H "Content-Type: application/json" \
     -d '{"kind":"host","natural_key":"lab-debian"}' > /dev/null 2>&1 || true
 
 # 3. Create identity_compromise incident for alice
 info "Seeding auth events for alice@lab-debian..."
 for i in $(seq 1 5); do
-    curl -sf -X POST "$API/v1/events/raw" \
+    curl -sf "${AUTH_HEADER[@]}" -X POST "$API/v1/events/raw" \
         -H "Content-Type: application/json" \
         -d "{\"source\":\"seeder\",\"kind\":\"auth.failed\",\"occurred_at\":\"2026-04-23T10:0${i}:00Z\",\"raw\":{},\"normalized\":{\"user\":\"alice\",\"source_ip\":\"1.2.3.4\",\"auth_type\":\"ssh\"},\"dedupe_key\":\"p11-fail-${i}\"}" \
         > /dev/null
 done
-curl -sf -X POST "$API/v1/events/raw" \
+curl -sf "${AUTH_HEADER[@]}" -X POST "$API/v1/events/raw" \
     -H "Content-Type: application/json" \
     -d '{"source":"seeder","kind":"auth.succeeded","occurred_at":"2026-04-23T10:06:00Z","raw":{},"normalized":{"user":"alice","source_ip":"1.2.3.4","auth_type":"ssh"},"dedupe_key":"p11-success-1"}' \
     > /dev/null
 
-INC_ID=$(curl -sf "$API/v1/incidents?limit=1" | \
+INC_ID=$(curl -sf "${AUTH_HEADER[@]}" "$API/v1/incidents?limit=1" | \
     python3 -c "import sys,json; d=json.load(sys.stdin); print(d['items'][0]['id'])")
 info "Incident created: $INC_ID"
 
 # 4. Propose + execute quarantine_host_lab
-PROP=$(curl -sf -X POST "$API/v1/responses" \
+PROP=$(curl -sf "${AUTH_HEADER[@]}" -X POST "$API/v1/responses" \
     -H "Content-Type: application/json" \
     -d "{\"incident_id\":\"$INC_ID\",\"kind\":\"quarantine_host_lab\",\"params\":{\"host\":\"lab-debian\",\"source_ip\":\"1.2.3.4\"}}")
 QACTION_ID=$(echo "$PROP" | python3 -c "import sys,json; print(json.load(sys.stdin)['action']['id'])")
 
-EXEC=$(curl -sf -X POST "$API/v1/responses/$QACTION_ID/execute")
+EXEC=$(curl -sf "${AUTH_HEADER[@]}" -X POST "$API/v1/responses/$QACTION_ID/execute")
 Q_RESULT=$(echo "$EXEC" | python3 -c "import sys,json; print(json.load(sys.stdin)['log']['result'])")
 Q_STATUS=$(echo "$EXEC" | python3 -c "import sys,json; print(json.load(sys.stdin)['action']['status'])")
 AR_STATUS=$(echo "$EXEC" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['log']['reversal_info']['ar_dispatch_status'])")
@@ -183,12 +186,12 @@ SLEEP_PID=$($COMPOSE exec -T lab-debian pgrep -n sleep 2>/dev/null || echo "")
 info "sleep PID: $SLEEP_PID"
 
 # 7. Propose + execute kill_process_lab
-KPROP=$(curl -sf -X POST "$API/v1/responses" \
+KPROP=$(curl -sf "${AUTH_HEADER[@]}" -X POST "$API/v1/responses" \
     -H "Content-Type: application/json" \
     -d "{\"incident_id\":\"$INC_ID\",\"kind\":\"kill_process_lab\",\"params\":{\"host\":\"lab-debian\",\"pid\":$SLEEP_PID,\"process_name\":\"sleep\"}}")
 KACTION_ID=$(echo "$KPROP" | python3 -c "import sys,json; print(json.load(sys.stdin)['action']['id'])")
 
-KEXEC=$(curl -sf -X POST "$API/v1/responses/$KACTION_ID/execute")
+KEXEC=$(curl -sf "${AUTH_HEADER[@]}" -X POST "$API/v1/responses/$KACTION_ID/execute")
 K_RESULT=$(echo "$KEXEC" | python3 -c "import sys,json; print(json.load(sys.stdin)['log']['result'])")
 check "$K_RESULT" "ok" "kill_process: action result ok"
 

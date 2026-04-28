@@ -12,6 +12,9 @@ GREEN='\033[0;32m'
 RED='\033[0;31m'
 RESET='\033[0m'
 
+[ -f "labs/.smoke-env" ] && source "labs/.smoke-env" || true
+[ -n "${SMOKE_API_TOKEN:-}" ] && AUTH_HEADER=(-H "Authorization: Bearer $SMOKE_API_TOKEN") || AUTH_HEADER=()
+
 pass() { echo -e "${GREEN}PASS${RESET} $1"; }
 fail() { echo -e "${RED}FAIL${RESET} $1"; exit 1; }
 header() { echo -e "\n${BOLD}--- $1 ---${RESET}"; }
@@ -41,7 +44,7 @@ NOW7=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 # Check 16: OpenAPI spec is live and has correct title
 # ---------------------------------------------------------------------------
 header "Check 16: OpenAPI spec title"
-SPEC_TITLE=$(curl -sf "${API}/openapi.json" | python3 -c "import json,sys; print(json.load(sys.stdin)['info']['title'])")
+SPEC_TITLE=$(curl -sf "${AUTH_HEADER[@]}" "${API}/openapi.json" | python3 -c "import json,sys; print(json.load(sys.stdin)['info']['title'])")
 [ "${SPEC_TITLE}" = "CyberCat" ] \
   && pass "OpenAPI spec title == 'CyberCat'" \
   || fail "OpenAPI spec title is '${SPEC_TITLE}', expected 'CyberCat'"
@@ -51,7 +54,7 @@ SPEC_TITLE=$(curl -sf "${API}/openapi.json" | python3 -c "import json,sys; print
 # ---------------------------------------------------------------------------
 header "Check 17: Standalone endpoint incident (no prior identity event)"
 
-PROC17=$(curl -s -w "\n%{http_code}" -X POST "${API}/v1/events/raw" \
+PROC17=$(curl -s "${AUTH_HEADER[@]}" -w "\n%{http_code}" -X POST "${API}/v1/events/raw" \
   -H "Content-Type: application/json" \
   -d "{
     \"source\":\"seeder\",
@@ -72,7 +75,7 @@ HTTP17=$(echo "${PROC17}" | tail -1)
 
 sleep 1
 
-INCIDENTS17=$(curl -sf "${API}/v1/incidents?limit=10")
+INCIDENTS17=$(curl -sf "${AUTH_HEADER[@]}" "${API}/v1/incidents?limit=10")
 EC_COUNT=$(echo "${INCIDENTS17}" | python3 -c "
 import json,sys
 data=json.load(sys.stdin)
@@ -107,7 +110,7 @@ python3 -c "import sys; c=float('${EC_CONF}'); sys.exit(0 if abs(c-0.60)<0.01 el
 # ---------------------------------------------------------------------------
 header "Check 18: Standalone endpoint dedup"
 
-curl -s -o /dev/null -X POST "${API}/v1/events/raw" \
+curl -s "${AUTH_HEADER[@]}" -o /dev/null -X POST "${API}/v1/events/raw" \
   -H "Content-Type: application/json" \
   -d "{
     \"source\":\"seeder\",
@@ -125,7 +128,7 @@ curl -s -o /dev/null -X POST "${API}/v1/events/raw" \
 
 sleep 1
 
-EC_COUNT2=$(curl -sf "${API}/v1/incidents?limit=10" | python3 -c "
+EC_COUNT2=$(curl -sf "${AUTH_HEADER[@]}" "${API}/v1/incidents?limit=10" | python3 -c "
 import json,sys
 data=json.load(sys.stdin)
 print(sum(1 for i in data['items'] if i['kind']=='endpoint_compromise'))
@@ -146,7 +149,7 @@ docker compose -f "${COMPOSE_FILE}" exec -T redis redis-cli FLUSHDB > /dev/null 
 NOW19=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
 for i in 1 2 3 4; do
-  curl -s -o /dev/null -X POST "${API}/v1/events/raw" \
+  curl -s "${AUTH_HEADER[@]}" -o /dev/null -X POST "${API}/v1/events/raw" \
     -H "Content-Type: application/json" \
     -d "{
       \"source\":\"seeder\",\"kind\":\"auth.failed\",\"occurred_at\":\"${NOW19}\",
@@ -156,7 +159,7 @@ for i in 1 2 3 4; do
     }"
 done
 
-curl -s -o /dev/null -X POST "${API}/v1/events/raw" \
+curl -s "${AUTH_HEADER[@]}" -o /dev/null -X POST "${API}/v1/events/raw" \
   -H "Content-Type: application/json" \
   -d "{
     \"source\":\"seeder\",\"kind\":\"auth.succeeded\",\"occurred_at\":\"${NOW19}\",
@@ -167,7 +170,7 @@ curl -s -o /dev/null -X POST "${API}/v1/events/raw" \
 
 sleep 1
 
-curl -s -o /dev/null -X POST "${API}/v1/events/raw" \
+curl -s "${AUTH_HEADER[@]}" -o /dev/null -X POST "${API}/v1/events/raw" \
   -H "Content-Type: application/json" \
   -d "{
     \"source\":\"seeder\",\"kind\":\"process.created\",\"occurred_at\":\"${NOW19}\",
@@ -184,7 +187,7 @@ curl -s -o /dev/null -X POST "${API}/v1/events/raw" \
 
 sleep 1
 
-INCIDENTS19=$(curl -sf "${API}/v1/incidents?limit=10")
+INCIDENTS19=$(curl -sf "${AUTH_HEADER[@]}" "${API}/v1/incidents?limit=10")
 KINDS19=$(echo "${INCIDENTS19}" | python3 -c "
 import json,sys
 data=json.load(sys.stdin)
@@ -210,7 +213,7 @@ docker compose -f "${COMPOSE_FILE}" exec -T redis redis-cli FLUSHDB > /dev/null 
 
 NOW20=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-curl -s -o /dev/null -X POST "${API}/v1/events/raw" \
+curl -s "${AUTH_HEADER[@]}" -o /dev/null -X POST "${API}/v1/events/raw" \
   -H "Content-Type: application/json" \
   -d "{
     \"source\":\"seeder\",\"kind\":\"process.created\",\"occurred_at\":\"${NOW20}\",
@@ -225,7 +228,7 @@ curl -s -o /dev/null -X POST "${API}/v1/events/raw" \
 
 sleep 1
 
-SIGMA_DETS=$(curl -sf "${API}/v1/detections?rule_source=sigma&limit=50")
+SIGMA_DETS=$(curl -sf "${AUTH_HEADER[@]}" "${API}/v1/detections?rule_source=sigma&limit=50")
 SIGMA_COUNT=$(echo "${SIGMA_DETS}" | python3 -c "
 import json,sys
 data=json.load(sys.stdin)
@@ -251,7 +254,7 @@ for d in data['items']:
 # ---------------------------------------------------------------------------
 header "Check 21: Sigma + Python co-fire on same event"
 
-ALL_DETS=$(curl -sf "${API}/v1/detections?limit=100")
+ALL_DETS=$(curl -sf "${AUTH_HEADER[@]}" "${API}/v1/detections?limit=100")
 HAS_PY=$(echo "${ALL_DETS}" | python3 -c "
 import json,sys
 data=json.load(sys.stdin)

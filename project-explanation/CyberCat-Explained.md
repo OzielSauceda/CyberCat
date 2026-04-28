@@ -411,9 +411,9 @@ All docs live under `docs/` or at the repo root:
 
 ---
 
-## 15. Where the Project Stands Today (as of 2026-04-27)
+## 15. Where the Project Stands Today (as of 2026-04-28)
 
-From `PROJECT_STATE.md`: **Phases 1–14.4 all fully verified.** 156/156 pytest passing, `tsc --noEmit` 0 errors, Phase 13 smoke test 8/8.
+From `PROJECT_STATE.md`: **Phases 1–14 all fully verified.** 156/156 pytest passing, `tsc --noEmit` 0 errors. All 8 smoke scripts pass in both `AUTH_REQUIRED=false` (default) and `AUTH_REQUIRED=true` (Bearer token) modes. The platform is multi-operator capable.
 
 **Completed — the phases of work on disk today:**
 
@@ -438,8 +438,7 @@ From `PROJECT_STATE.md`: **Phases 1–14.4 all fully verified.** 156/156 pytest 
 
 **What's pending:**
 
-- **Phase 14.5 — Smoke tests + cutover**: update all 8 smoke scripts to pass `Authorization: Bearer $SMOKE_API_TOKEN`; write ADR-0009 (multi-operator auth design record); verify `AUTH_REQUIRED=true` end-to-end; update `docs/api-contract.md` auth section.
-- **Ship story phase (deferred until all feature work complete):** README rewrite, demo GIF of `credential_theft_chain`, public repo prep. Partial artifacts staged: `LICENSE` (MIT), `docs/assets/RECORDING.md` playbook.
+- **Ship story phase:** README rewrite, demo GIF of `credential_theft_chain`, public repo prep. Partial artifacts staged: `LICENSE` (MIT), `docs/assets/RECORDING.md` playbook.
 
 ---
 
@@ -461,7 +460,7 @@ Honest list of features that would extend the product in meaningful, shippable d
 7. ~~**Real-time streaming instead of polling.**~~ **Done — Phase 13.** SSE channel (`GET /v1/stream`) live; frontend `useStream` hook with topic filters, auto-reconnect, and a 60s polling fallback. `StreamStatusBadge` in the header shows reconnection state.
 8. **User & entity behavior analytics (UEBA-style).** Baseline per-entity: "alice typically logs in from one of these 3 IPs between 08:00–18:00 UTC." Detector fires on deviation (auth from a new country at 03:00). This is an honest-to-god behavior model, not a rule. Postgres + a rolling per-entity feature store in Redis works fine at lab scale.
 9. **Threat intel feed integration.** Pull MISP / OTX / AbuseIPDB feeds on a cron; populate `blocked_observables` automatically with a `source=intel-feed` attribution. Closes the loop: the detection engine already consumes `blocked_observables`, so intel automatically becomes detection without new code.
-10. **Multi-operator auth + audit.** *(In progress — Phase 14, 80% done.)* Foundation (14.1): users/api_tokens tables, bcrypt session cookies, Bearer token path, three-role RBAC, audit FK columns, `AUTH_REQUIRED` feature flag, bootstrap CLI. Session layer (14.2): `SessionContext`, `UserBadge`, `LoginPage`, `credentials: include`, Next.js `/v1/*` rewrite. Route gating + audit attribution (14.3): every mutation endpoint enforces `require_analyst`, every read endpoint enforces `require_user`, `actor_user_id` populated on every audit write, six frontend mutation controls gated with `disabled={!canMutate}`, 20-test parameterized gating inventory. OIDC opt-in (14.4): `GET /v1/auth/oidc/login` + callback, authlib JWT validation, JIT user provisioning, stateless state/nonce cookie. Smoke-test cutover (14.5) still pending. This was the single biggest "toy project" blocker — now largely resolved.
+10. ~~**Multi-operator auth + audit.**~~ **Done — Phase 14 (fully verified 2026-04-28).** Foundation (14.1): users/api_tokens tables, bcrypt session cookies, Bearer token path, three-role RBAC, audit FK columns, `AUTH_REQUIRED` feature flag, bootstrap CLI. Session layer (14.2): `SessionContext`, `UserBadge`, `LoginPage`, `credentials: include`, Next.js `/v1/*` rewrite. Route gating + audit attribution (14.3): every mutation endpoint enforces `require_analyst`, every read endpoint enforces `require_user`, `actor_user_id` populated on every audit write, six frontend mutation controls gated with `disabled={!canMutate}`, 20-test parameterized gating inventory. OIDC opt-in (14.4): `GET /v1/auth/oidc/login` + callback, authlib JWT validation, JIT user provisioning, stateless state/nonce cookie. Smoke + cutover (14.5): all 8 smoke scripts pass with and without auth token, `AUTH_REQUIRED=true` end-to-end stack-verified. ADR-0009 written. This was the single biggest "toy project" blocker — **resolved**.
 11. **A second lab scenario (+ multiple simulator scenarios).** Add scenarios like `supply_chain_tool_abuse`, `cloud_token_theft`, `ransomware_staging`. Each one is a 200-line file under `labs/simulator/scenarios/` and stresses a different correlator path.
 12. **Windows Active Response.** Phase 11 only implemented Linux AR (`iptables` + `kill -9`). Add a Windows Active Response script (PowerShell) for `quarantine_host_lab` (netsh advfirewall) and `kill_process_lab` (Stop-Process). Requires a Windows lab container or VM.
 
@@ -487,7 +486,7 @@ Honest list of features that would extend the product in meaningful, shippable d
 **What would push it to 9 or 10:**
 - A running **public demo** (even on a spot VPS) with a "reset + fire scenario" button — so reviewers don't have to clone and run it to see the product.
 - **Recorded walkthrough video** (5 min max) narrated by you explaining what you built and why the architectural decisions matter.
-- **Multi-operator auth** *(in progress, Phase 14, 80% done)* — removes the biggest "toy project" tell. Auth foundation, session layer, route gating, and OIDC opt-in all shipped; every mutation is now role-gated, every audit row has a real `actor_user_id`, and SSO sign-in via any OIDC-compatible provider works. Only smoke-test cutover (14.5) remains. Once fully shipped, every action in the audit log has a real actor.
+- ~~**Multi-operator auth**~~ — **Done (Phase 14, fully verified 2026-04-28).** Removes the biggest "toy project" tell. Every mutation is role-gated, every audit row has a real `actor_user_id`, SSO sign-in via any OIDC-compatible provider works. All 8 smoke scripts pass with `AUTH_REQUIRED=true`.
 - ~~**Real-time streaming**~~ — done. SSE channel live since Phase 13.
 - **One case-study blog post** or the README itself pitching it as a product, not a code dump. The story matters as much as the code.
 

@@ -2,7 +2,7 @@
 
 The first product API surface. Source of truth for FastAPI routers (Phase 2+) and the generated TypeScript client consumed by the frontend (Phase 5). Schemas are expressed in pydantic-style sketches; the final pydantic models live in `backend/app/api/schemas/` and emit the OpenAPI the frontend reads.
 
-All endpoints are JSON. Auth is out of scope for v1 (single operator, localhost); once we add auth, every endpoint except `/healthz` gets an auth dependency.
+All endpoints are JSON. Auth is implemented as of Phase 14 (ADR-0009). When `AUTH_REQUIRED=true`, every endpoint except `/healthz` and `/readyz` requires either a valid session cookie or a `Authorization: Bearer cct_...` API token. See §10 for the full auth surface. When `AUTH_REQUIRED=false` (the default), all endpoints are open — used for local dev and CI.
 
 Base URL: `http://localhost:8000`
 
@@ -553,7 +553,49 @@ class ActionKind(str, Enum):
 
 ---
 
-## 10. Scenario coverage check
+## 10. Auth surface (Phase 14)
+
+Controlled by `AUTH_REQUIRED` env var (default `false`).
+
+### `POST /auth/login`
+Email + password sign-in. Sets an HMAC-signed session cookie (`cybercat_session`, 8h TTL).
+
+**Request:** `{ "email": "...", "password": "..." }`  
+**Response 200:** `{ "id": UUID, "email": str, "role": "admin"|"analyst"|"read_only" }`  
+**Errors:** 401 `invalid_credentials`.
+
+### `POST /auth/logout`
+Clears the session cookie.
+
+### `GET /auth/me`
+Returns the current user from the session cookie or Bearer token. Used by the frontend `SessionContext` on mount.
+
+**Response 200:** `{ "id": UUID, "email": str, "role": str }` or `{ "authenticated": false }` when `AUTH_REQUIRED=false`.
+
+### `GET /auth/config`
+Returns feature flags for the frontend: `{ "auth_required": bool, "oidc_enabled": bool }`. Always unauthenticated — used before the session is established.
+
+### `GET /auth/oidc/login`
+Redirects to the configured OIDC provider's authorization endpoint. Sets a short-lived signed state cookie.  
+**Returns:** HTTP 302 to provider, or HTTP 501 if OIDC is not configured.
+
+### `GET /auth/oidc/callback`
+Exchanges the authorization code for an ID token, validates the JWT signature + nonce (authlib), JIT-provisions the user if new (role=`read_only`), sets a session cookie, redirects to `/`.
+
+### Gating model
+
+| Verb | Route pattern | Required role |
+|------|--------------|---------------|
+| `POST` | `/v1/events/raw` | `analyst` |
+| `POST/DELETE` | `/v1/responses/*`, `/v1/incidents/*/transitions`, `/v1/incidents/*/notes`, `/v1/evidence-requests/*/collect`, `/v1/evidence-requests/*/dismiss`, `/v1/lab/assets` | `analyst` |
+| `GET` | all `/v1/*` endpoints, `/v1/stream` | any authenticated user |
+| `GET` | `/healthz`, `/readyz`, `/auth/config` | none (always public) |
+
+`analyst` = `analyst` or `admin` role. `read_only` users can read everything but all mutation controls are disabled in the frontend.
+
+---
+
+## 11. Scenario coverage check
 
 Cross-reference with `docs/scenarios/identity-endpoint-chain.md`:
 
@@ -570,11 +612,12 @@ No endpoint gaps for v1.
 
 ---
 
-## 11. What's explicitly out of v1 API
+## 12. What's explicitly out of v1 API
 
-- WebSocket / SSE push. Frontend polls `GET /incidents/{id}` and `GET /incidents` at modest intervals in v1.
+- ~~WebSocket / SSE push.~~ **Done — Phase 13.** `GET /v1/stream` is live; frontend uses `useStream` with topic filters and a 60s polling fallback.
+- ~~Auth endpoints.~~ **Done — Phase 14.** See §10.
 - Bulk operations (no `POST /incidents:bulk_close` etc.).
 - Full-text search across incidents/events. Filtering is enum/entity-based only.
 - Export endpoints (PDF report, STIX bundle, etc.).
-- Auth endpoints. Added behind an ADR.
 - Rule management API (enable/disable Sigma rules at runtime). Rules are file-configured in v1.
+- SAML. Intentionally omitted — see ADR-0009.

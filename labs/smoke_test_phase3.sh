@@ -7,6 +7,9 @@ set -e
 BASE="http://localhost:8000/v1"
 T0=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
+[ -f "labs/.smoke-env" ] && source "labs/.smoke-env" || true
+[ -n "${SMOKE_API_TOKEN:-}" ] && AUTH_HEADER=(-H "Authorization: Bearer $SMOKE_API_TOKEN") || AUTH_HEADER=()
+
 echo "=== Phase 3 Smoke Test ==="
 echo "Base URL: $BASE"
 echo "t0: $T0"
@@ -17,7 +20,7 @@ post_event() {
     local label="$1"
     local payload="$2"
     echo "--- $label ---"
-    curl -s -X POST "$BASE/events/raw" \
+    curl -s "${AUTH_HEADER[@]}" -X POST "$BASE/events/raw" \
         -H "Content-Type: application/json" \
         -d "$payload" | python3 -m json.tool
     echo ""
@@ -52,7 +55,7 @@ echo ""
 
 # Check incident list
 echo "--- GET /v1/incidents ---"
-curl -s "$BASE/incidents" | python3 -m json.tool
+curl -s "${AUTH_HEADER[@]}" "$BASE/incidents" | python3 -m json.tool
 echo ""
 
 echo "=== Done. Check output above for: ==="

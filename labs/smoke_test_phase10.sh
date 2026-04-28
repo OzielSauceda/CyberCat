@@ -11,6 +11,9 @@ GREEN='\033[0;32m'
 RED='\033[0;31m'
 RESET='\033[0m'
 
+[ -f "labs/.smoke-env" ] && source "labs/.smoke-env" || true
+[ -n "${SMOKE_API_TOKEN:-}" ] && AUTH_HEADER=(-H "Authorization: Bearer $SMOKE_API_TOKEN") || AUTH_HEADER=()
+
 pass() { echo -e "${GREEN}PASS${RESET} $1"; PASSES=$((PASSES + 1)); }
 fail() { echo -e "${RED}FAIL${RESET} $1"; FAILURES=$((FAILURES + 1)); exit 1; }
 header() { echo -e "\n${BOLD}--- $1 ---${RESET}"; }
@@ -44,7 +47,7 @@ docker compose -f "${COMPOSE_FILE}" exec -T redis redis-cli FLUSHDB > /dev/null 
 # ---------------------------------------------------------------------------
 header "Check 1: Backend health"
 
-STATUS=$(curl -sf "${API}/healthz" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('status',''))")
+STATUS=$(curl -sf "${AUTH_HEADER[@]}" "${API}/healthz" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('status',''))")
 [ "$STATUS" = "ok" ] \
   && pass "Backend /healthz returns status=ok" \
   || fail "Backend /healthz unexpected: $STATUS"
@@ -54,21 +57,33 @@ STATUS=$(curl -sf "${API}/healthz" | python3 -c "import json,sys; d=json.load(sy
 # ---------------------------------------------------------------------------
 header "Check 2: httpx importable"
 
-python -c "import httpx" 2>/dev/null \
-  && pass "httpx importable in local Python" \
-  || fail "httpx not installed — run: pip install httpx"
+# On Windows+MSYS2, 'python' is the MSYS2 system Python (no pip/httpx).
+# Use 'py -3' (Windows py launcher) if available, otherwise fall back to 'python'.
+if py -3 -c "import httpx" 2>/dev/null; then
+  PYEXE="py -3"
+elif python -c "import httpx" 2>/dev/null; then
+  PYEXE="python"
+else
+  fail "httpx not installed — run: pip install httpx  (or: py -3 -m pip install httpx)"
+  exit 1
+fi
+pass "httpx importable (using ${PYEXE})"
 
 # ---------------------------------------------------------------------------
 # Check 3–4: Run simulator (speed=0.1, ~30s) with built-in --verify
 # ---------------------------------------------------------------------------
 header "Checks 3–4: Run credential_theft_chain scenario"
 
-echo "Running: python -m labs.simulator --scenario credential_theft_chain --speed 0.1 --verify"
-python -m labs.simulator \
+SIMULATOR_TOKEN_ARG=()
+[ -n "${SMOKE_API_TOKEN:-}" ] && SIMULATOR_TOKEN_ARG=(--token "${SMOKE_API_TOKEN}")
+
+echo "Running: ${PYEXE} -m labs.simulator --scenario credential_theft_chain --speed 0.1 --verify ${SIMULATOR_TOKEN_ARG[*]}"
+$PYEXE -m labs.simulator \
   --scenario credential_theft_chain \
   --speed 0.1 \
   --verify \
   --api "${API}" \
+  "${SIMULATOR_TOKEN_ARG[@]}" \
   && pass "Simulator exited 0" \
   || fail "Simulator exited non-zero (verify failed)"
 
@@ -80,7 +95,7 @@ sleep 2
 # ---------------------------------------------------------------------------
 header "Checks 5–9: Incident API assertions"
 
-INCIDENTS=$(curl -sf "${API}/v1/incidents?limit=100")
+INCIDENTS=$(curl -sf "${AUTH_HEADER[@]}" "${API}/v1/incidents?limit=100")
 
 # Check 5: identity_compromise incident present for alice
 IC_ID=$(echo "$INCIDENTS" | python3 -c "
@@ -127,7 +142,7 @@ print((hit or {}).get('severity', ''))
   || fail "chain incident severity expected critical, got '${CHAIN_SEV}'"
 
 # Check 9: identity_compromise incident has at least 1 evidence_request (auto-proposed)
-ER_COUNT=$(curl -sf "${API}/v1/evidence-requests?incident_id=${IC_ID}" | python3 -c "
+ER_COUNT=$(curl -sf "${AUTH_HEADER[@]}" "${API}/v1/evidence-requests?incident_id=${IC_ID}" | python3 -c "
 import json, sys
 d = json.load(sys.stdin)
 print(len(d.get('items', [])))
@@ -141,7 +156,7 @@ print(len(d.get('items', [])))
 # ---------------------------------------------------------------------------
 header "Checks 10–12: Chain incident detail"
 
-CHAIN_DETAIL=$(curl -sf "${API}/v1/incidents/${CHAIN_ID}")
+CHAIN_DETAIL=$(curl -sf "${AUTH_HEADER[@]}" "${API}/v1/incidents/${CHAIN_ID}")
 
 # Check 10: rationale mentions cross-layer
 RATIONALE=$(echo "$CHAIN_DETAIL" | python3 -c "import json,sys; print(json.load(sys.stdin).get('rationale',''))")
@@ -177,15 +192,16 @@ header "Checks 13–14: Idempotency (re-run produces no new incidents)"
 INCIDENT_COUNT_BEFORE=$(echo "$INCIDENTS" | python3 -c "import json,sys; print(len(json.load(sys.stdin)['items']))")
 
 echo "Re-running simulator (dedup should absorb all)..."
-python -m labs.simulator \
+$PYEXE -m labs.simulator \
   --scenario credential_theft_chain \
   --speed 0.1 \
   --no-verify \
-  --api "${API}" > /dev/null
+  --api "${API}" \
+  "${SIMULATOR_TOKEN_ARG[@]}" > /dev/null
 
 sleep 1
 
-INCIDENTS_AFTER=$(curl -sf "${API}/v1/incidents?limit=100")
+INCIDENTS_AFTER=$(curl -sf "${AUTH_HEADER[@]}" "${API}/v1/incidents?limit=100")
 INCIDENT_COUNT_AFTER=$(echo "$INCIDENTS_AFTER" | python3 -c "import json,sys; print(len(json.load(sys.stdin)['items']))")
 
 [ "$INCIDENT_COUNT_AFTER" -eq "$INCIDENT_COUNT_BEFORE" ] \
@@ -193,11 +209,12 @@ INCIDENT_COUNT_AFTER=$(echo "$INCIDENTS_AFTER" | python3 -c "import json,sys; pr
   || fail "Re-run created new incidents: before=${INCIDENT_COUNT_BEFORE} after=${INCIDENT_COUNT_AFTER}"
 
 # Check 14: --verify still passes on re-run (existing incidents satisfy it)
-python -m labs.simulator \
+$PYEXE -m labs.simulator \
   --scenario credential_theft_chain \
   --speed 0.1 \
   --no-verify \
-  --api "${API}" > /dev/null \
+  --api "${API}" \
+  "${SIMULATOR_TOKEN_ARG[@]}" > /dev/null \
   && pass "Re-run completes without error (all events deduped)" \
   || fail "Re-run exited non-zero unexpectedly"
 
@@ -206,7 +223,7 @@ python -m labs.simulator \
 # ---------------------------------------------------------------------------
 header "Check 15: Simulator self-reports available scenarios"
 
-SIM_HELP=$(python -m labs.simulator --scenario nonexistent_xyz --api "${API}" 2>&1 || true)
+SIM_HELP=$($PYEXE -m labs.simulator --scenario nonexistent_xyz --api "${API}" 2>&1 || true)
 echo "$SIM_HELP" | grep -q "credential_theft_chain" \
   && pass "Simulator lists credential_theft_chain in available scenarios" \
   || fail "Simulator did not list credential_theft_chain in unknown-scenario error"

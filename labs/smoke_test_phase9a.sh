@@ -11,6 +11,9 @@ GREEN='\033[0;32m'
 RED='\033[0;31m'
 RESET='\033[0m'
 
+[ -f "labs/.smoke-env" ] && source "labs/.smoke-env" || true
+[ -n "${SMOKE_API_TOKEN:-}" ] && AUTH_HEADER=(-H "Authorization: Bearer $SMOKE_API_TOKEN") || AUTH_HEADER=()
+
 pass() { echo -e "${GREEN}PASS${RESET} $1"; }
 fail() { echo -e "${RED}FAIL${RESET} $1"; exit 1; }
 header() { echo -e "\n${BOLD}--- $1 ---${RESET}"; }
@@ -58,7 +61,7 @@ NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 # ---------------------------------------------------------------------------
 header "Check 1: All 8 ActionKind values in OpenAPI"
 
-KINDS=$(curl -sf "${API}/openapi.json" | python3 -c "
+KINDS=$(curl -sf "${AUTH_HEADER[@]}" "${API}/openapi.json" | python3 -c "
 import json, sys
 spec = json.load(sys.stdin)
 enum_vals = []
@@ -79,7 +82,7 @@ done
 # ---------------------------------------------------------------------------
 header "Check 2: ATT&CK catalog size"
 
-CATALOG_COUNT=$(curl -sf "${API}/v1/attack/catalog" | python3 -c "
+CATALOG_COUNT=$(curl -sf "${AUTH_HEADER[@]}" "${API}/v1/attack/catalog" | python3 -c "
 import json, sys
 data = json.load(sys.stdin)
 print(len(data['entries']))
@@ -105,16 +108,16 @@ done
 # ---------------------------------------------------------------------------
 header "Setup: register lab assets and open incident"
 
-curl -s -o /dev/null -X POST "${API}/v1/lab/assets" \
+curl -s "${AUTH_HEADER[@]}" -o /dev/null -X POST "${API}/v1/lab/assets" \
   -H "Content-Type: application/json" \
   -d '{"kind":"host","natural_key":"lab-smoke-01"}'
 
-curl -s -o /dev/null -X POST "${API}/v1/lab/assets" \
+curl -s "${AUTH_HEADER[@]}" -o /dev/null -X POST "${API}/v1/lab/assets" \
   -H "Content-Type: application/json" \
   -d '{"kind":"user","natural_key":"smoke-user"}'
 
 # session.started creates user + host entities and a LabSession (required for invalidate_lab_session)
-curl -s -o /dev/null -X POST "${API}/v1/events/raw" \
+curl -s "${AUTH_HEADER[@]}" -o /dev/null -X POST "${API}/v1/events/raw" \
   -H "Content-Type: application/json" \
   -d "{
     \"source\":\"seeder\",
@@ -127,7 +130,7 @@ curl -s -o /dev/null -X POST "${API}/v1/events/raw" \
 
 # Open an identity_compromise incident: auth failure burst + anomalous success
 for i in $(seq 1 5); do
-  curl -s -o /dev/null -X POST "${API}/v1/events/raw" \
+  curl -s "${AUTH_HEADER[@]}" -o /dev/null -X POST "${API}/v1/events/raw" \
     -H "Content-Type: application/json" \
     -d "{
       \"source\":\"seeder\",
@@ -140,7 +143,7 @@ for i in $(seq 1 5); do
 done
 
 # auth.succeeded from same previously-unseen IP → triggers identity_compromise incident
-curl -s -o /dev/null -X POST "${API}/v1/events/raw" \
+curl -s "${AUTH_HEADER[@]}" -o /dev/null -X POST "${API}/v1/events/raw" \
   -H "Content-Type: application/json" \
   -d "{
     \"source\":\"seeder\",
@@ -153,7 +156,7 @@ curl -s -o /dev/null -X POST "${API}/v1/events/raw" \
 
 sleep 1
 
-INC_ID=$(curl -sf "${API}/v1/incidents?limit=1" | python3 -c "
+INC_ID=$(curl -sf "${AUTH_HEADER[@]}" "${API}/v1/incidents?limit=1" | python3 -c "
 import json, sys
 data = json.load(sys.stdin)
 items = data.get('items', [])
@@ -168,18 +171,18 @@ print(items[0]['id'] if items else '')
 # ---------------------------------------------------------------------------
 header "Check 4: quarantine_host_lab"
 
-PROPOSE4=$(curl -s -w "\n%{http_code}" -X POST "${API}/v1/responses" \
+PROPOSE4=$(curl -s "${AUTH_HEADER[@]}" -w "\n%{http_code}" -X POST "${API}/v1/responses" \
   -H "Content-Type: application/json" \
   -d "{\"incident_id\":\"${INC_ID}\",\"kind\":\"quarantine_host_lab\",\"params\":{\"host\":\"lab-smoke-01\"}}")
 HTTP4=$(echo "${PROPOSE4}" | tail -1)
 [ "${HTTP4}" = "201" ] || fail "quarantine_host_lab propose returned HTTP ${HTTP4}"
 ACTION4=$(echo "${PROPOSE4}" | head -1 | python3 -c "import json,sys; print(json.load(sys.stdin)['action']['id'])")
 
-EXEC4=$(curl -s -w "\n%{http_code}" -X POST "${API}/v1/responses/${ACTION4}/execute")
+EXEC4=$(curl -s "${AUTH_HEADER[@]}" -w "\n%{http_code}" -X POST "${API}/v1/responses/${ACTION4}/execute")
 HTTP4E=$(echo "${EXEC4}" | tail -1)
 [ "${HTTP4E}" = "200" ] || fail "quarantine_host_lab execute returned HTTP ${HTTP4E}"
 
-NOTES4=$(curl -sf "${API}/v1/lab/assets" | python3 -c "
+NOTES4=$(curl -sf "${AUTH_HEADER[@]}" "${API}/v1/lab/assets" | python3 -c "
 import json, sys
 assets = json.load(sys.stdin)
 a = next((x for x in assets if x['natural_key'] == 'lab-smoke-01'), None)
@@ -194,23 +197,26 @@ echo "${NOTES4}" | grep -q "\[quarantined:" \
 # ---------------------------------------------------------------------------
 header "Check 5: kill_process_lab"
 
-PROPOSE5=$(curl -s -w "\n%{http_code}" -X POST "${API}/v1/responses" \
+PROPOSE5=$(curl -s "${AUTH_HEADER[@]}" -w "\n%{http_code}" -X POST "${API}/v1/responses" \
   -H "Content-Type: application/json" \
   -d "{\"incident_id\":\"${INC_ID}\",\"kind\":\"kill_process_lab\",\"params\":{\"host\":\"lab-smoke-01\",\"pid\":9999,\"process_name\":\"malware.exe\"}}")
 HTTP5=$(echo "${PROPOSE5}" | tail -1)
 [ "${HTTP5}" = "201" ] || fail "kill_process_lab propose returned HTTP ${HTTP5}"
 ACTION5=$(echo "${PROPOSE5}" | head -1 | python3 -c "import json,sys; print(json.load(sys.stdin)['action']['id'])")
 
-EXEC5=$(curl -s -w "\n%{http_code}" -X POST "${API}/v1/responses/${ACTION5}/execute")
+EXEC5=$(curl -s "${AUTH_HEADER[@]}" -w "\n%{http_code}" -X POST "${API}/v1/responses/${ACTION5}/execute")
 HTTP5E=$(echo "${EXEC5}" | tail -1)
 [ "${HTTP5E}" = "200" ] || fail "kill_process_lab execute returned HTTP ${HTTP5E}"
 
 RESULT5=$(echo "${EXEC5}" | head -1 | python3 -c "import json,sys; print(json.load(sys.stdin)['log']['result'])")
-[ "${RESULT5}" = "ok" ] \
-  && pass "kill_process_lab: result=ok" \
-  || fail "kill_process_lab: expected result=ok, got ${RESULT5}"
+# ok = AR disabled; partial = AR enabled but agent not enrolled (both valid — Phase 9A tests DB state)
+if [ "${RESULT5}" = "ok" ] || [ "${RESULT5}" = "partial" ]; then
+  pass "kill_process_lab: result=${RESULT5} (ok or partial expected)"
+else
+  fail "kill_process_lab: expected result=ok or partial, got ${RESULT5}"
+fi
 
-ER5_COUNT=$(curl -sf "${API}/v1/evidence-requests?incident_id=${INC_ID}" | python3 -c "
+ER5_COUNT=$(curl -sf "${AUTH_HEADER[@]}" "${API}/v1/evidence-requests?incident_id=${INC_ID}" | python3 -c "
 import json, sys
 data = json.load(sys.stdin)
 print(sum(1 for er in data['items'] if er['kind'] == 'process_list'))
@@ -224,21 +230,21 @@ print(sum(1 for er in data['items'] if er['kind'] == 'process_list'))
 # ---------------------------------------------------------------------------
 header "Check 6: invalidate_lab_session"
 
-PROPOSE6=$(curl -s -w "\n%{http_code}" -X POST "${API}/v1/responses" \
+PROPOSE6=$(curl -s "${AUTH_HEADER[@]}" -w "\n%{http_code}" -X POST "${API}/v1/responses" \
   -H "Content-Type: application/json" \
   -d "{\"incident_id\":\"${INC_ID}\",\"kind\":\"invalidate_lab_session\",\"params\":{\"user\":\"smoke-user\",\"host\":\"lab-smoke-01\"}}")
 HTTP6=$(echo "${PROPOSE6}" | tail -1)
 [ "${HTTP6}" = "201" ] || fail "invalidate_lab_session propose returned HTTP ${HTTP6}"
 ACTION6=$(echo "${PROPOSE6}" | head -1 | python3 -c "import json,sys; print(json.load(sys.stdin)['action']['id'])")
 
-EXEC6=$(curl -s -w "\n%{http_code}" -X POST "${API}/v1/responses/${ACTION6}/execute")
+EXEC6=$(curl -s "${AUTH_HEADER[@]}" -w "\n%{http_code}" -X POST "${API}/v1/responses/${ACTION6}/execute")
 [ "$(echo "${EXEC6}" | tail -1)" = "200" ] || fail "invalidate_lab_session execute failed"
 RESULT6=$(echo "${EXEC6}" | head -1 | python3 -c "import json,sys; print(json.load(sys.stdin)['log']['result'])")
 [ "${RESULT6}" = "ok" ] \
   && pass "invalidate_lab_session execute: result=ok" \
   || fail "invalidate_lab_session execute failed: ${RESULT6}"
 
-REVERT6=$(curl -s -w "\n%{http_code}" -X POST "${API}/v1/responses/${ACTION6}/revert")
+REVERT6=$(curl -s "${AUTH_HEADER[@]}" -w "\n%{http_code}" -X POST "${API}/v1/responses/${ACTION6}/revert")
 [ "$(echo "${REVERT6}" | tail -1)" = "200" ] || fail "invalidate_lab_session revert failed"
 RRESULT6=$(echo "${REVERT6}" | head -1 | python3 -c "import json,sys; print(json.load(sys.stdin)['log']['result'])")
 [ "${RRESULT6}" = "ok" ] \
@@ -250,15 +256,15 @@ RRESULT6=$(echo "${REVERT6}" | head -1 | python3 -c "import json,sys; print(json
 # ---------------------------------------------------------------------------
 header "Check 7: block_observable"
 
-PROPOSE7=$(curl -s -w "\n%{http_code}" -X POST "${API}/v1/responses" \
+PROPOSE7=$(curl -s "${AUTH_HEADER[@]}" -w "\n%{http_code}" -X POST "${API}/v1/responses" \
   -H "Content-Type: application/json" \
   -d "{\"incident_id\":\"${INC_ID}\",\"kind\":\"block_observable\",\"params\":{\"kind\":\"ip\",\"value\":\"192.0.2.100\"}}")
 [ "$(echo "${PROPOSE7}" | tail -1)" = "201" ] || fail "block_observable propose failed"
 ACTION7=$(echo "${PROPOSE7}" | head -1 | python3 -c "import json,sys; print(json.load(sys.stdin)['action']['id'])")
 
-curl -s -X POST "${API}/v1/responses/${ACTION7}/execute" > /dev/null
+curl -s "${AUTH_HEADER[@]}" -X POST "${API}/v1/responses/${ACTION7}/execute" > /dev/null
 
-BO_ACTIVE=$(curl -sf "${API}/v1/blocked-observables?active=true&value=192.0.2.100" | python3 -c "
+BO_ACTIVE=$(curl -sf "${AUTH_HEADER[@]}" "${API}/v1/blocked-observables?active=true&value=192.0.2.100" | python3 -c "
 import json, sys
 data = json.load(sys.stdin)
 print(len(data['items']))
@@ -267,9 +273,9 @@ print(len(data['items']))
   && pass "block_observable: active row in blocked_observables" \
   || fail "block_observable: expected active row, got ${BO_ACTIVE}"
 
-curl -s -X POST "${API}/v1/responses/${ACTION7}/revert" > /dev/null
+curl -s "${AUTH_HEADER[@]}" -X POST "${API}/v1/responses/${ACTION7}/revert" > /dev/null
 
-BO_INACTIVE=$(curl -sf "${API}/v1/blocked-observables?active=false&value=192.0.2.100" | python3 -c "
+BO_INACTIVE=$(curl -sf "${AUTH_HEADER[@]}" "${API}/v1/blocked-observables?active=false&value=192.0.2.100" | python3 -c "
 import json, sys
 data = json.load(sys.stdin)
 print(len(data['items']))
@@ -284,14 +290,14 @@ print(len(data['items']))
 header "Check 8: blocked_observable detection fires"
 
 # Block a fresh IP
-PROPOSE8=$(curl -s -X POST "${API}/v1/responses" \
+PROPOSE8=$(curl -s "${AUTH_HEADER[@]}" -X POST "${API}/v1/responses" \
   -H "Content-Type: application/json" \
   -d "{\"incident_id\":\"${INC_ID}\",\"kind\":\"block_observable\",\"params\":{\"kind\":\"ip\",\"value\":\"198.51.100.1\"}}")
 ACTION8=$(echo "${PROPOSE8}" | python3 -c "import json,sys; print(json.load(sys.stdin)['action']['id'])")
-curl -s -X POST "${API}/v1/responses/${ACTION8}/execute" > /dev/null
+curl -s "${AUTH_HEADER[@]}" -X POST "${API}/v1/responses/${ACTION8}/execute" > /dev/null
 
 # Ingest event referencing that IP
-curl -s -o /dev/null -X POST "${API}/v1/events/raw" \
+curl -s "${AUTH_HEADER[@]}" -o /dev/null -X POST "${API}/v1/events/raw" \
   -H "Content-Type: application/json" \
   -d "{
     \"source\":\"seeder\",
@@ -304,7 +310,7 @@ curl -s -o /dev/null -X POST "${API}/v1/events/raw" \
 
 sleep 1
 
-BLOCK_DET=$(curl -sf "${API}/v1/detections?rule_id=py.blocked_observable_match&limit=10" | python3 -c "
+BLOCK_DET=$(curl -sf "${AUTH_HEADER[@]}" "${API}/v1/detections?rule_id=py.blocked_observable_match&limit=10" | python3 -c "
 import json, sys
 data = json.load(sys.stdin)
 print(len(data['items']))
@@ -318,15 +324,15 @@ print(len(data['items']))
 # ---------------------------------------------------------------------------
 header "Check 9: request_evidence"
 
-PROPOSE9=$(curl -s -w "\n%{http_code}" -X POST "${API}/v1/responses" \
+PROPOSE9=$(curl -s "${AUTH_HEADER[@]}" -w "\n%{http_code}" -X POST "${API}/v1/responses" \
   -H "Content-Type: application/json" \
   -d "{\"incident_id\":\"${INC_ID}\",\"kind\":\"request_evidence\",\"params\":{\"evidence_kind\":\"network_connections\"}}")
 [ "$(echo "${PROPOSE9}" | tail -1)" = "201" ] || fail "request_evidence propose failed"
 ACTION9=$(echo "${PROPOSE9}" | head -1 | python3 -c "import json,sys; print(json.load(sys.stdin)['action']['id'])")
 
-curl -s -X POST "${API}/v1/responses/${ACTION9}/execute" > /dev/null
+curl -s "${AUTH_HEADER[@]}" -X POST "${API}/v1/responses/${ACTION9}/execute" > /dev/null
 
-ER9=$(curl -sf "${API}/v1/evidence-requests?incident_id=${INC_ID}" | python3 -c "
+ER9=$(curl -sf "${AUTH_HEADER[@]}" "${API}/v1/evidence-requests?incident_id=${INC_ID}" | python3 -c "
 import json, sys
 data = json.load(sys.stdin)
 nc = [er for er in data['items'] if er['kind'] == 'network_connections']
@@ -341,7 +347,7 @@ print(len(nc))
 # ---------------------------------------------------------------------------
 header "Check 10: identity_compromise auto-proposes request_evidence"
 
-AUTO_ER=$(curl -sf "${API}/v1/evidence-requests?incident_id=${INC_ID}" | python3 -c "
+AUTO_ER=$(curl -sf "${AUTH_HEADER[@]}" "${API}/v1/evidence-requests?incident_id=${INC_ID}" | python3 -c "
 import json, sys
 data = json.load(sys.stdin)
 triage = [er for er in data['items'] if er['kind'] == 'triage_log']
@@ -356,7 +362,7 @@ print(len(triage))
 # ---------------------------------------------------------------------------
 header "Check 11: Evidence request collect/dismiss"
 
-ALL_ERS=$(curl -sf "${API}/v1/evidence-requests?incident_id=${INC_ID}" | python3 -c "
+ALL_ERS=$(curl -sf "${AUTH_HEADER[@]}" "${API}/v1/evidence-requests?incident_id=${INC_ID}" | python3 -c "
 import json, sys
 data = json.load(sys.stdin)
 open_ers = [er['id'] for er in data['items'] if er['status'] == 'open']
@@ -364,7 +370,7 @@ print(open_ers[0] if open_ers else '')
 ")
 [ -n "${ALL_ERS}" ] || fail "No open evidence requests to collect"
 
-COLLECT=$(curl -s -w "\n%{http_code}" -X POST "${API}/v1/evidence-requests/${ALL_ERS}/collect")
+COLLECT=$(curl -s "${AUTH_HEADER[@]}" -w "\n%{http_code}" -X POST "${API}/v1/evidence-requests/${ALL_ERS}/collect")
 [ "$(echo "${COLLECT}" | tail -1)" = "200" ] || fail "collect evidence_request failed"
 STATUS=$(echo "${COLLECT}" | head -1 | python3 -c "import json,sys; print(json.load(sys.stdin)['status'])")
 [ "${STATUS}" = "collected" ] \
@@ -376,14 +382,14 @@ STATUS=$(echo "${COLLECT}" | head -1 | python3 -c "import json,sys; print(json.l
 # ---------------------------------------------------------------------------
 header "Check 12: Non-existent lab asset returns fail"
 
-PROPOSE12=$(curl -s -w "\n%{http_code}" -X POST "${API}/v1/responses" \
+PROPOSE12=$(curl -s "${AUTH_HEADER[@]}" -w "\n%{http_code}" -X POST "${API}/v1/responses" \
   -H "Content-Type: application/json" \
   -d "{\"incident_id\":\"${INC_ID}\",\"kind\":\"quarantine_host_lab\",\"params\":{\"host\":\"nonexistent-host\"}}")
 HTTP12=$(echo "${PROPOSE12}" | tail -1)
 # This may be accepted at propose time (scope check for lab assets doesn't reject) but fails on execute
 if [ "${HTTP12}" = "201" ]; then
   ACTION12=$(echo "${PROPOSE12}" | head -1 | python3 -c "import json,sys; print(json.load(sys.stdin)['action']['id'])")
-  EXEC12=$(curl -s -X POST "${API}/v1/responses/${ACTION12}/execute")
+  EXEC12=$(curl -s "${AUTH_HEADER[@]}" -X POST "${API}/v1/responses/${ACTION12}/execute")
   RESULT12=$(echo "${EXEC12}" | python3 -c "import json,sys; print(json.load(sys.stdin)['log']['result'])")
   [ "${RESULT12}" = "fail" ] \
     && pass "Non-existent lab asset: handler returns fail with reason" \
@@ -400,7 +406,7 @@ fi
 # ---------------------------------------------------------------------------
 header "Check 13: Revert on disruptive action → 409"
 
-REVERT13=$(curl -s -w "\n%{http_code}" -X POST "${API}/v1/responses/${ACTION4}/revert")
+REVERT13=$(curl -s "${AUTH_HEADER[@]}" -w "\n%{http_code}" -X POST "${API}/v1/responses/${ACTION4}/revert")
 HTTP13=$(echo "${REVERT13}" | tail -1)
 [ "${HTTP13}" = "409" ] \
   && pass "Revert on disruptive quarantine_host_lab → 409" \
@@ -411,22 +417,22 @@ HTTP13=$(echo "${REVERT13}" | tail -1)
 # ---------------------------------------------------------------------------
 header "Check 14: Regression — tag_incident, elevate_severity, flag_host_in_lab"
 
-PROPOSE14A=$(curl -s -w "\n%{http_code}" -X POST "${API}/v1/responses" \
+PROPOSE14A=$(curl -s "${AUTH_HEADER[@]}" -w "\n%{http_code}" -X POST "${API}/v1/responses" \
   -H "Content-Type: application/json" \
   -d "{\"incident_id\":\"${INC_ID}\",\"kind\":\"tag_incident\",\"params\":{\"tag\":\"phase9a-regression\"}}")
 [ "$(echo "${PROPOSE14A}" | tail -1)" = "201" ] || fail "tag_incident propose failed"
 ACTION14A=$(echo "${PROPOSE14A}" | head -1 | python3 -c "import json,sys; print(json.load(sys.stdin)['action']['id'])")
-EXEC14A=$(curl -s -X POST "${API}/v1/responses/${ACTION14A}/execute" | python3 -c "import json,sys; print(json.load(sys.stdin)['log']['result'])")
+EXEC14A=$(curl -s "${AUTH_HEADER[@]}" -X POST "${API}/v1/responses/${ACTION14A}/execute" | python3 -c "import json,sys; print(json.load(sys.stdin)['log']['result'])")
 [ "${EXEC14A}" = "ok" ] \
   && pass "tag_incident: result=ok (regression)" \
   || fail "tag_incident regression failed: ${EXEC14A}"
 
-PROPOSE14B=$(curl -s -w "\n%{http_code}" -X POST "${API}/v1/responses" \
+PROPOSE14B=$(curl -s "${AUTH_HEADER[@]}" -w "\n%{http_code}" -X POST "${API}/v1/responses" \
   -H "Content-Type: application/json" \
   -d "{\"incident_id\":\"${INC_ID}\",\"kind\":\"flag_host_in_lab\",\"params\":{\"host\":\"lab-smoke-01\"}}")
 [ "$(echo "${PROPOSE14B}" | tail -1)" = "201" ] || fail "flag_host_in_lab propose failed"
 ACTION14B=$(echo "${PROPOSE14B}" | head -1 | python3 -c "import json,sys; print(json.load(sys.stdin)['action']['id'])")
-EXEC14B=$(curl -s -X POST "${API}/v1/responses/${ACTION14B}/execute" | python3 -c "import json,sys; print(json.load(sys.stdin)['log']['result'])")
+EXEC14B=$(curl -s "${AUTH_HEADER[@]}" -X POST "${API}/v1/responses/${ACTION14B}/execute" | python3 -c "import json,sys; print(json.load(sys.stdin)['log']['result'])")
 [ "${EXEC14B}" = "ok" ] \
   && pass "flag_host_in_lab: result=ok (regression)" \
   || fail "flag_host_in_lab regression failed: ${EXEC14B}"

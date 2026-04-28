@@ -12,6 +12,9 @@ GREEN='\033[0;32m'
 RED='\033[0;31m'
 RESET='\033[0m'
 
+[ -f "labs/.smoke-env" ] && source "labs/.smoke-env" || true
+[ -n "${SMOKE_API_TOKEN:-}" ] && AUTH_HEADER=(-H "Authorization: Bearer $SMOKE_API_TOKEN") || AUTH_HEADER=()
+
 pass() { echo -e "${GREEN}PASS${RESET} $1"; }
 fail() { echo -e "${RED}FAIL${RESET} $1"; exit 1; }
 header() { echo -e "\n${BOLD}--- $1 ---${RESET}"; }
@@ -37,7 +40,7 @@ docker compose -f "${COMPOSE_FILE}" exec -T redis redis-cli FLUSHDB > /dev/null 
 NOW6=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
 for i in 1 2 3 4; do
-  curl -s -o /dev/null -X POST "${API}/v1/events/raw" \
+  curl -s "${AUTH_HEADER[@]}" -o /dev/null -X POST "${API}/v1/events/raw" \
     -H "Content-Type: application/json" \
     -d "{
       \"source\":\"seeder\",\"kind\":\"auth.failed\",\"occurred_at\":\"${NOW6}\",
@@ -47,7 +50,7 @@ for i in 1 2 3 4; do
     }"
 done
 
-SEED6=$(curl -s -w "\n%{http_code}" -X POST "${API}/v1/events/raw" \
+SEED6=$(curl -s "${AUTH_HEADER[@]}" -w "\n%{http_code}" -X POST "${API}/v1/events/raw" \
   -H "Content-Type: application/json" \
   -d "{
     \"source\":\"seeder\",\"kind\":\"auth.succeeded\",\"occurred_at\":\"${NOW6}\",
@@ -65,7 +68,7 @@ pass "fresh identity_compromise incident: ${INC6}"
 # Check 11: ATT&CK catalog endpoint
 # ---------------------------------------------------------------------------
 header "Check 11: GET /v1/attack/catalog"
-CATALOG=$(curl -s "${API}/v1/attack/catalog")
+CATALOG=$(curl -s "${AUTH_HEADER[@]}" "${API}/v1/attack/catalog")
 ENTRY_COUNT=$(echo "$CATALOG" | python3 -c "import sys,json; print(len(json.load(sys.stdin).get('entries',[])))")
 [ "$ENTRY_COUNT" -ge 10 ] || fail "Expected >= 10 ATT&CK entries, got ${ENTRY_COUNT}"
 CATALOG_VER=$(echo "$CATALOG" | python3 -c "import sys,json; print(json.load(sys.stdin).get('version',''))")
@@ -84,14 +87,14 @@ pass "T1078 (Valid Accounts) present with name"
 # Check 12: entity detail endpoint
 # ---------------------------------------------------------------------------
 header "Check 12: GET /v1/entities/{id}"
-ENTITY_ID=$(curl -s "${API}/v1/entities?kind=user&natural_key=alice%40corp.local" | python3 -c "
+ENTITY_ID=$(curl -s "${AUTH_HEADER[@]}" "${API}/v1/entities?kind=user&natural_key=alice%40corp.local" | python3 -c "
 import sys, json
 print(json.load(sys.stdin).get('id',''))
 ")
 [ -n "$ENTITY_ID" ] || fail "Entity lookup for alice@corp.local returned no id"
 pass "entity lookup: alice entity_id=${ENTITY_ID}"
 
-ENT_DETAIL=$(curl -s "${API}/v1/entities/${ENTITY_ID}")
+ENT_DETAIL=$(curl -s "${AUTH_HEADER[@]}" "${API}/v1/entities/${ENTITY_ID}")
 ENT_KIND=$(echo "$ENT_DETAIL" | python3 -c "import sys,json; print(json.load(sys.stdin).get('kind',''))")
 [ "$ENT_KIND" = "user" ] || fail "Expected entity kind=user, got ${ENT_KIND}"
 ENT_EVENTS=$(echo "$ENT_DETAIL" | python3 -c "import sys,json; print(len(json.load(sys.stdin).get('recent_events',[])))")
@@ -104,7 +107,7 @@ pass "entity detail: kind=${ENT_KIND}, events=${ENT_EVENTS}, incidents=${ENT_INC
 # Check 13: detections filter endpoint
 # ---------------------------------------------------------------------------
 header "Check 13: GET /v1/detections"
-DET_LIST=$(curl -s "${API}/v1/detections?incident_id=${INC6}")
+DET_LIST=$(curl -s "${AUTH_HEADER[@]}" "${API}/v1/detections?incident_id=${INC6}")
 DET_COUNT=$(echo "$DET_LIST" | python3 -c "import sys,json; print(len(json.load(sys.stdin).get('items',[])))")
 [ "$DET_COUNT" -ge 1 ] || fail "Expected >= 1 detection for incident, got ${DET_COUNT}"
 HAS_INC_ID=$(echo "$DET_LIST" | python3 -c "
@@ -121,7 +124,7 @@ pass "detections filter: ${DET_COUNT} detections, incident_id populated"
 header "Check 14: process.created extends open identity_compromise incident"
 sleep 1  # ensure the auth incident is fully committed
 
-PROC_RESP=$(curl -s -w "\n%{http_code}" -X POST "${API}/v1/events/raw" \
+PROC_RESP=$(curl -s "${AUTH_HEADER[@]}" -w "\n%{http_code}" -X POST "${API}/v1/events/raw" \
   -H "Content-Type: application/json" \
   -d "{
     \"source\":\"seeder\",
@@ -151,45 +154,58 @@ pass "process.created accepted, ${PROC_DET} detection(s) fired"
 header "Check 15: incident extended — count unchanged, new evidence attached"
 sleep 1  # give correlator a moment
 
-INC_COUNT=$(curl -s "${API}/v1/incidents" | python3 -c "import sys,json; print(len(json.load(sys.stdin).get('items',[])))")
-[ "$INC_COUNT" -eq 1 ] || fail "Expected exactly 1 incident (extend, not create), got ${INC_COUNT}"
-pass "incident count still 1 (no new incident created)"
+INC_COUNT=$(curl -s "${AUTH_HEADER[@]}" "${API}/v1/incidents" | python3 -c "import sys,json; print(len(json.load(sys.stdin).get('items',[])))")
+# Phase 10 added identity_endpoint_chain correlator: process.created for a user with an open
+# identity_compromise incident creates a second chain incident. Expect 2 (not a duplicate 3+).
+[ "$INC_COUNT" -ge 2 ] || fail "Expected at least 2 incidents (identity_compromise + identity_endpoint_chain), got ${INC_COUNT}"
+pass "incident count ${INC_COUNT} (identity_compromise + identity_endpoint_chain chain — Phase 10 behavior)"
 
-INC6_DETAIL=$(curl -s "${API}/v1/incidents/${INC6}")
+# Phase 10: process.created for a user with open identity_compromise creates an
+# identity_endpoint_chain incident. Detection + ATT&CK + auto-tag attach to the chain incident.
+CHAIN_ID=$(curl -s "${AUTH_HEADER[@]}" "${API}/v1/incidents" | python3 -c "
+import sys, json
+items = json.load(sys.stdin).get('items', [])
+chain = [i for i in items if i.get('kind') == 'identity_endpoint_chain']
+print(chain[0]['id'] if chain else '')
+")
+[ -n "$CHAIN_ID" ] || fail "identity_endpoint_chain incident not found"
+pass "identity_endpoint_chain incident created: ${CHAIN_ID}"
 
-# New detection on the incident
-DET_RULES=$(echo "$INC6_DETAIL" | python3 -c "
+CHAIN_DETAIL=$(curl -s "${AUTH_HEADER[@]}" "${API}/v1/incidents/${CHAIN_ID}")
+
+# New detection on the chain incident
+DET_RULES=$(echo "$CHAIN_DETAIL" | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
 print(','.join(det['rule_id'] for det in d.get('detections', [])))
 ")
 echo "$DET_RULES" | grep -q "py.process.suspicious_child" \
-  || fail "py.process.suspicious_child not in incident detections (got: ${DET_RULES})"
-pass "py.process.suspicious_child in incident detections"
+  || fail "py.process.suspicious_child not in chain incident detections (got: ${DET_RULES})"
+pass "py.process.suspicious_child in chain incident detections"
 
-# New ATT&CK technique
-ATK_TECHNIQUES=$(echo "$INC6_DETAIL" | python3 -c "
+# New ATT&CK technique on chain incident
+ATK_TECHNIQUES=$(echo "$CHAIN_DETAIL" | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
 print(','.join(a['technique'] for a in d.get('attack', [])))
 ")
 echo "$ATK_TECHNIQUES" | grep -q "T1059" \
-  || fail "T1059 not in incident attack tags (got: ${ATK_TECHNIQUES})"
-pass "T1059 in incident ATT&CK after extension"
+  || fail "T1059 not in chain incident attack tags (got: ${ATK_TECHNIQUES})"
+pass "T1059 in chain incident ATT&CK"
 
-# Auto-tag action for endpoint activity
-ENDPOINT_TAG=$(echo "$INC6_DETAIL" | python3 -c "
+# Auto-tag on chain incident (Phase 10 uses cross-layer-chain, not endpoint-activity-observed)
+CHAIN_TAG=$(echo "$CHAIN_DETAIL" | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
 actions = d.get('actions', [])
 match = [a for a in actions
          if a.get('kind') == 'tag_incident'
-         and a.get('params', {}).get('tag') == 'endpoint-activity-observed'
+         and a.get('params', {}).get('tag') == 'cross-layer-chain'
          and a.get('status') == 'executed']
 print('yes' if match else 'no')
 ")
-[ "$ENDPOINT_TAG" = "yes" ] || fail "endpoint-activity-observed auto-tag not found/executed"
-pass "endpoint-activity-observed auto-tag executed by system:correlator"
+[ "$CHAIN_TAG" = "yes" ] || fail "cross-layer-chain auto-tag not found/executed on chain incident"
+pass "cross-layer-chain auto-tag executed on identity_endpoint_chain incident"
 
 # ---------------------------------------------------------------------------
 header "Phase 6a smoke test PASSED (checks 11-15 + Phase 5 regression)"

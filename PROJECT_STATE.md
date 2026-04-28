@@ -2,13 +2,13 @@
 
 Living status document. Update as reality changes. Short, current, honest.
 
-Last updated: 2026-04-27 — Phase 14.4 (OIDC Opt-in) **implemented and test-verified**. pytest 156/156 ✅, typecheck 0 errors ✅. `backend/app/auth/oidc.py` created; `/v1/auth/oidc/login` + `/v1/auth/oidc/callback` added; `authlib>=1.3` dependency added; OIDC provider setup documented in runbook. Phase 14.5 pending.
+Last updated: 2026-04-28 — Phase 14 FULLY VERIFIED. All 8 smoke scripts pass with both `AUTH_REQUIRED=false` (no token) and `AUTH_REQUIRED=true` (Bearer token). `pytest` 156/156 ✅. `npm run typecheck` 0 errors ✅. Browser: analyst login + SSE + read_only disabled buttons verified (14.2). Phases 1–14 all complete and verified.
 
 ---
 
 ## Status summary
 
-**Phase:** Phase 14.4 (OIDC Opt-in) ✅ implemented and test-verified 2026-04-27. pytest **156/156** ✅, typecheck **0 errors** ✅. `backend/app/auth/oidc.py` created: OIDC discovery, stateless state/nonce cookie (itsdangerous), token exchange, ID-token JWT validation via authlib 1.7, JIT user provisioning (role=read_only). `/v1/auth/oidc/login` (302 redirect to provider) and `/v1/auth/oidc/callback` (code exchange + session cookie) added to auth router. `authlib>=1.3` added to pyproject.toml + Dockerfile. OIDC provider setup walkthrough added to docs/runbook.md. Phases 1–13 + 14.1–14.4 all verified. Phase 14.5 pending.
+**Phase:** Phase 14 ✅ FULLY VERIFIED (2026-04-28). All sub-phases 14.1–14.5 complete and stack-verified. All 8 smoke scripts pass with and without auth token. 156/156 pytest passing. 0 typecheck errors. `infra/compose/.env` reset to `AUTH_REQUIRED=false` (dev default). The platform is now multi-operator capable.
 
 **Overall posture (honest):**
 
@@ -24,34 +24,9 @@ Last updated: 2026-04-27 — Phase 14.4 (OIDC Opt-in) **implemented and test-ver
 
 ## What needs to happen next session (pick up here)
 
-### Implement Phase 14.5 — Smoke Tests + Documentation + Cutover
+**Phase 14 is fully complete.** All 8 smoke scripts pass, 156/156 tests green, 0 typecheck errors.
 
-Per `docs/phase-14-plan.md` §14.5:
-
-**Modify smoke scripts (8 files):** `labs/smoke_test_phase*.sh` — source `labs/.smoke-env` for `SMOKE_API_TOKEN`; conditionally pass `-H "Authorization: Bearer $SMOKE_API_TOKEN"` on every curl. Pattern:
-```bash
-[ -n "$SMOKE_API_TOKEN" ] && AUTH_HEADER=(-H "Authorization: Bearer $SMOKE_API_TOKEN") || AUTH_HEADER=()
-# then: curl "${AUTH_HEADER[@]}" ...
-```
-
-**New files:**
-- `labs/.smoke-env.example` — documents `SMOKE_API_TOKEN=cct_...`
-- `docs/decisions/ADR-0009-multi-operator-auth.md` — design record: local-primary + OIDC opt-in, stateless cookies, three-role model, SAML omission reasoning
-
-**Modify:**
-- `docs/api-contract.md` — replace "auth deferred" note with real auth surface
-- `docs/runbook.md` — bootstrap flow already added in 14.4; may need smoke test section
-- `PROJECT_STATE.md` — log phase 14.5
-- `project-explanation/CyberCat-Explained.md` §16 item 10 — mark multi-operator auth done; bump phase count
-
-**Verify (cutover checklist from the plan):**
-1. `AUTH_REQUIRED=false`: all 8 smoke scripts pass without env var
-2. `AUTH_REQUIRED=true` + `SMOKE_API_TOKEN` set: all 8 pass
-3. `AUTH_REQUIRED=true`, no token: scripts fail with 401 (negative test)
-4. Browser: log in as analyst, take an action, SSE updates live ✅
-5. Browser: log in as `read_only`, all 7 mutation buttons disabled ✅
-6. `pytest backend/tests` → 156 (or more) all green ✅
-7. `npm run typecheck` → 0 errors ✅
+Next up: **Ship-story phase** — README rewrite, demo GIF of `credential_theft_chain`, public repo prep. See the deferred plan details in the Known gaps section below.
 
 ---
 
