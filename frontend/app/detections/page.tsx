@@ -17,6 +17,7 @@ import {
 } from "../lib/api"
 import { useAttackEntry } from "../lib/attackCatalog"
 import { useStream } from "../lib/useStream"
+import { DETECTION_RULE_SOURCE_LABELS } from "../lib/labels"
 
 type SinceKey = "1h" | "24h" | "7d" | "all"
 const sinceKeys: SinceKey[] = ["1h", "24h", "7d", "all"]
@@ -85,8 +86,9 @@ function DetectionRow({ detection }: { detection: DetectionItem }) {
               ? "border-violet-800/50 text-violet-400/75 bg-violet-950/25"
               : "border-blue-800/50 text-blue-400/75 bg-blue-950/25"
           }`}
+          title={DETECTION_RULE_SOURCE_LABELS[detection.rule_source].plain}
         >
-          {detection.rule_source}
+          {DETECTION_RULE_SOURCE_LABELS[detection.rule_source].label}
         </span>
 
         {/* Severity */}
@@ -95,8 +97,8 @@ function DetectionRow({ detection }: { detection: DetectionItem }) {
         </div>
 
         {/* Confidence */}
-        <span className="shrink-0 flex items-center gap-2 hidden sm:flex">
-          <span className="font-mono text-[11px] text-dossier-ink/25">conf</span>
+        <span className="shrink-0 flex items-center gap-2 hidden sm:flex" title="Confidence — how certain CyberCat is this is real (0–100)">
+          <span className="font-mono text-[11px] text-dossier-ink/25">confidence</span>
           <ConfidenceBar value={detection.confidence_hint} />
         </span>
 
@@ -108,7 +110,7 @@ function DetectionRow({ detection }: { detection: DetectionItem }) {
         {/* Incident link indicator */}
         {detection.incident_id && (
           <span className="shrink-0 font-mono text-xs text-dossier-evidenceTape/50">
-            → incident
+            → case
           </span>
         )}
       </div>
@@ -204,7 +206,7 @@ export default function DetectionsPage() {
           </h1>
           <p className="mt-0.5 font-mono text-xs text-dossier-ink/30">
             {data
-              ? `${allItems.length} rule${allItems.length !== 1 ? "s" : ""} fired${hasFilters ? " · filtered" : ""}`
+              ? `${allItems.length} rule match${allItems.length !== 1 ? "es" : ""}${hasFilters ? " · filtered" : ""}`
               : "Loading…"}
           </p>
         </div>
@@ -215,17 +217,22 @@ export default function DetectionsPage() {
 
       {/* ── Filters ──────────────────────────────────────────────────────── */}
       <div className="flex flex-wrap items-center gap-2">
-        <span className="font-mono text-[11px] uppercase tracking-widest text-dossier-ink/25 mr-1">source</span>
-        {(["", "sigma", "py"] as const).map((s) => (
-          <Chip
-            key={s || "all"}
-            label={s || "any"}
-            active={ruleSource === s}
-            onClick={() => setRuleSource(s as DetectionRuleSource | "")}
-          />
-        ))}
+        <span className="font-mono text-[11px] uppercase tracking-widest text-dossier-ink/25 mr-1">Source</span>
+        {(["", "sigma", "py"] as const).map((s) => {
+          const label = s === "" ? "Any" : DETECTION_RULE_SOURCE_LABELS[s].label
+          const title = s === "" ? "All rule sources" : DETECTION_RULE_SOURCE_LABELS[s].plain
+          return (
+            <span key={s || "all"} title={title}>
+              <Chip
+                label={label}
+                active={ruleSource === s}
+                onClick={() => setRuleSource(s as DetectionRuleSource | "")}
+              />
+            </span>
+          )
+        })}
         <div className="w-px h-4 bg-dossier-paperEdge mx-2" />
-        <span className="font-mono text-[11px] uppercase tracking-widest text-dossier-ink/25 mr-1">since</span>
+        <span className="font-mono text-[11px] uppercase tracking-widest text-dossier-ink/25 mr-1">Since</span>
         {sinceKeys.map((k) => (
           <Chip
             key={k}
@@ -256,8 +263,8 @@ export default function DetectionsPage() {
       {error && !data && <ErrorState error={error} onRetry={refetch} />}
       {error && data && (
         <div className="flex items-center gap-2 border border-cyber-orange/20 bg-cyber-orange/5 px-3 py-2 font-mono text-xs text-cyber-orange">
-          <span>⚠ Last refresh failed — {error.message}</span>
-          <button onClick={refetch} className="ml-auto underline hover:text-dossier-evidenceTape">Retry</button>
+          <span>⚠ Couldn't refresh — {error.message}</span>
+          <button onClick={refetch} className="ml-auto underline hover:text-dossier-evidenceTape">Try again</button>
         </div>
       )}
 
@@ -268,11 +275,11 @@ export default function DetectionsPage() {
         </div>
       ) : allItems.length === 0 ? (
         <EmptyState
-          title="No detections yet"
+          title="No rule matches yet"
           hint={
             hasFilters
               ? "No detections match the current filters."
-              : "Events haven't arrived yet. Start the agent or send events through the API to see detection rules fire."
+              : "Once events arrive, every rule that matches them will show up here."
           }
           action={
             hasFilters ? (

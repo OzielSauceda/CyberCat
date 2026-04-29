@@ -26,9 +26,16 @@ import {
   type TimelineEvent,
 } from "../../lib/api"
 import { useAttackEntry } from "../../lib/attackCatalog"
+import {
+  EVENT_SOURCE_LABELS,
+  INCIDENT_EVENT_ROLE_LABELS,
+  INCIDENT_KIND_LABELS,
+  eventKindLabel,
+} from "../../lib/labels"
 import { useStream } from "../../lib/useStream"
 import { EvidenceRequestsPanel } from "../../components/EvidenceRequestsPanel"
 import { JargonTerm } from "../../components/JargonTerm"
+import { PlainTerm } from "../../components/PlainTerm"
 import { ActionsPanel } from "./ActionsPanel"
 import { AttackKillChainPanel } from "./AttackKillChainPanel"
 import { EntityGraphPanel } from "./EntityGraphPanel"
@@ -112,19 +119,34 @@ function TimelinePanel({ events, entities }: { events: TimelineEvent[]; entities
   const renderEvent = (ev: TimelineEvent, showEntityChips = true) => {
     const summary = getEventSummary(ev)
     const linkedEntities = entities.filter((e) => ev.entity_ids.includes(e.id))
+    const kindEntry = eventKindLabel(ev.kind)
+    const sourceEntry = EVENT_SOURCE_LABELS[ev.source]
+    const roleEntry = INCIDENT_EVENT_ROLE_LABELS[ev.role_in_incident]
     return (
       <div key={ev.id} className="flex flex-col gap-1 border-b border-dossier-paperEdge py-2.5 last:border-0">
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <span className="font-mono text-dossier-evidenceTape/50">
             {new Date(ev.occurred_at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
           </span>
-          <span className="font-mono font-medium text-dossier-ink">{ev.kind}</span>
-          <span className="rounded border border-dossier-paperEdge bg-dossier-stamp px-1 py-0.5 font-mono text-dossier-ink/40">
-            {ev.source}
-          </span>
-          <span className={`rounded border px-1.5 py-0.5 text-[10px] font-case font-semibold uppercase tracking-wider ${roleStyles[ev.role_in_incident] ?? roleStyles.context}`}>
-            {ev.role_in_incident}
-          </span>
+          <PlainTerm
+            primary={kindEntry.label}
+            technical={ev.kind}
+            slug={kindEntry.slug}
+            plain={kindEntry.plain}
+            className="font-medium text-dossier-ink"
+          />
+          <PlainTerm
+            primary={sourceEntry.label}
+            slug={sourceEntry.slug}
+            plain={sourceEntry.plain}
+            className="rounded border border-dossier-paperEdge bg-dossier-stamp px-1 py-0.5 font-mono text-[10px] text-dossier-ink/40"
+          />
+          <PlainTerm
+            primary={roleEntry.label}
+            slug={roleEntry.slug}
+            plain={roleEntry.plain}
+            className={`rounded border px-1.5 py-0.5 text-[10px] font-case font-semibold uppercase tracking-wider ${roleStyles[ev.role_in_incident] ?? roleStyles.context}`}
+          />
           {summary && <span className="font-mono text-dossier-ink/60 ml-auto text-right">{summary}</span>}
         </div>
         {showEntityChips && linkedEntities.length > 0 && (
@@ -391,8 +413,8 @@ export default function IncidentDetailPage({ params }: { params: Promise<{ id: s
   if (isNotFound) {
     return (
       <div className="flex flex-col items-center gap-4 py-24 text-center">
-        <span className="font-mono text-xs tracking-widest text-dossier-redaction/40">404 NOT FOUND</span>
-        <p className="font-case text-xl font-bold uppercase tracking-wider text-dossier-ink/60">Case file not found</p>
+        <span className="font-mono text-xs tracking-widest text-dossier-redaction/40">404</span>
+        <p className="font-case text-xl font-bold uppercase tracking-wider text-dossier-ink/60">We couldn't find that incident</p>
         <Link href="/incidents" className="font-case text-[10px] uppercase tracking-widest text-dossier-evidenceTape underline underline-offset-2 hover:text-dossier-ink transition-colors">
           ← Back to incidents
         </Link>
@@ -413,8 +435,8 @@ export default function IncidentDetailPage({ params }: { params: Promise<{ id: s
       {/* Error banners */}
       {error && !loading && incident && (
         <div className="mb-4 flex items-center gap-2 rounded border border-cyber-orange/30 bg-cyber-orange/5 px-3 py-2 font-mono text-[10px] text-cyber-orange">
-          <span>⚠</span><span>Refresh failed — {error.message}</span>
-          <button onClick={refetch} className="ml-auto underline hover:text-dossier-evidenceTape">Retry</button>
+          <span>⚠</span><span>Couldn't refresh — {error.message}</span>
+          <button onClick={refetch} className="ml-auto underline hover:text-dossier-evidenceTape">Try again</button>
         </div>
       )}
       {error && !incident && !loading && <ErrorState error={error} onRetry={refetch} />}
@@ -432,9 +454,12 @@ export default function IncidentDetailPage({ params }: { params: Promise<{ id: s
                   INC-{incident.id.slice(-8).toUpperCase()}
                 </span>
                 <span className="font-mono text-[9px] text-dossier-ink/20">·</span>
-                <span className="font-case text-[9px] uppercase tracking-widest text-dossier-ink/25">
-                  {incident.kind.replace(/_/g, " ")}
-                </span>
+                <PlainTerm
+                  primary={INCIDENT_KIND_LABELS[incident.kind].label}
+                  plain={INCIDENT_KIND_LABELS[incident.kind].plain}
+                  slug="incident-kind"
+                  className="font-case text-[9px] uppercase tracking-widest text-dossier-ink/25"
+                />
               </div>
               <h1 className="mb-3 text-lg font-semibold leading-snug text-dossier-ink">
                 {incident.title}
@@ -469,8 +494,18 @@ export default function IncidentDetailPage({ params }: { params: Promise<{ id: s
               </p>
             </div>
             <p className="max-w-prose text-sm leading-relaxed text-dossier-ink/80">
-              {incident.rationale}
+              {incident.summary ?? incident.rationale}
             </p>
+            {incident.summary && incident.rationale && incident.summary !== incident.rationale ? (
+              <details className="mt-3 group">
+                <summary className="cursor-pointer font-case text-[10px] uppercase tracking-widest text-dossier-ink/40 transition-colors hover:text-dossier-evidenceTape">
+                  Show technical detail
+                </summary>
+                <p className="mt-2 max-w-prose text-xs leading-relaxed text-dossier-ink/55 font-mono">
+                  {incident.rationale}
+                </p>
+              </details>
+            ) : null}
           </div>
 
           {/* ── Tabs ── */}

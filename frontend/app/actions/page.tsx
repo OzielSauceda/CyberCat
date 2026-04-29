@@ -15,6 +15,16 @@ import {
   type ActionSummary,
 } from "../lib/api"
 import { useStream } from "../lib/useStream"
+import { ACTION_FORMS } from "../lib/actionForms"
+import {
+  ACTION_CLASSIFICATION_LABELS,
+  ACTION_STATUS_LABELS,
+  humanizeKind,
+} from "../lib/labels"
+
+function actionKindLabel(kind: ActionKind): string {
+  return ACTION_FORMS[kind]?.label ?? humanizeKind(kind)
+}
 
 const ACTION_KINDS: ActionKind[] = [
   "tag_incident",
@@ -92,8 +102,8 @@ function ActionRow({ action }: { action: ActionSummary }) {
       </div>
 
       {/* Kind */}
-      <span className="flex-1 font-mono text-sm text-dossier-ink/80 truncate min-w-0">
-        {action.kind}
+      <span className="flex-1 text-sm text-dossier-ink/80 truncate min-w-0" title={action.kind}>
+        {actionKindLabel(action.kind as ActionKind)}
       </span>
 
       {/* Status */}
@@ -113,8 +123,9 @@ function ActionRow({ action }: { action: ActionSummary }) {
             ? "border-dossier-paperEdge text-dossier-ink/30"
             : "border-dossier-evidenceTape/30 text-dossier-evidenceTape/60"
         }`}
+        title={action.proposed_by === "system" ? "Proposed automatically by CyberCat" : "Proposed by an analyst"}
       >
-        {action.proposed_by}
+        {action.proposed_by === "system" ? "auto" : "analyst"}
       </span>
 
       {/* Time */}
@@ -186,30 +197,40 @@ export default function ActionsPage() {
       <div className="space-y-2">
         {/* Row 1: status + class */}
         <div className="flex flex-wrap items-center gap-1.5">
-          <span className="font-mono text-[11px] uppercase tracking-widest text-dossier-ink/25 mr-1">status</span>
-          {STATUS_OPTIONS.map((s) => (
-            <Chip
-              key={s || "all"}
-              label={s || "any"}
-              active={statusFilter === s}
-              onClick={() => setStatusFilter(s as ActionStatus | "")}
-            />
-          ))}
+          <span className="font-mono text-[11px] uppercase tracking-widest text-dossier-ink/25 mr-1">Status</span>
+          {STATUS_OPTIONS.map((s) => {
+            const label = s === "" ? "Any" : ACTION_STATUS_LABELS[s].label
+            const title = s === "" ? "All statuses" : ACTION_STATUS_LABELS[s].plain
+            return (
+              <span key={s || "all"} title={title}>
+                <Chip
+                  label={label}
+                  active={statusFilter === s}
+                  onClick={() => setStatusFilter(s as ActionStatus | "")}
+                />
+              </span>
+            )
+          })}
           <div className="w-px h-4 bg-dossier-paperEdge mx-2" />
-          <span className="font-mono text-[11px] uppercase tracking-widest text-dossier-ink/25 mr-1">class</span>
-          {CLASSIFICATION_OPTIONS.map((c) => (
-            <Chip
-              key={c || "all"}
-              label={c ? c.replace("_", " ") : "any"}
-              active={classFilter === c}
-              onClick={() => setClassFilter(c as ActionClassification | "")}
-            />
-          ))}
+          <span className="font-mono text-[11px] uppercase tracking-widest text-dossier-ink/25 mr-1">Risk level</span>
+          {CLASSIFICATION_OPTIONS.map((c) => {
+            const label = c === "" ? "Any" : ACTION_CLASSIFICATION_LABELS[c].label
+            const title = c === "" ? "All risk levels" : ACTION_CLASSIFICATION_LABELS[c].plain
+            return (
+              <span key={c || "all"} title={title}>
+                <Chip
+                  label={label}
+                  active={classFilter === c}
+                  onClick={() => setClassFilter(c as ActionClassification | "")}
+                />
+              </span>
+            )
+          })}
         </div>
 
         {/* Row 2: since + kind */}
         <div className="flex flex-wrap items-center gap-1.5">
-          <span className="font-mono text-[11px] uppercase tracking-widest text-dossier-ink/25 mr-1">since</span>
+          <span className="font-mono text-[11px] uppercase tracking-widest text-dossier-ink/25 mr-1">Since</span>
           {(Object.keys(SINCE_LABELS) as SinceKey[]).map((k) => (
             <Chip
               key={k}
@@ -219,15 +240,15 @@ export default function ActionsPage() {
             />
           ))}
           <div className="w-px h-4 bg-dossier-paperEdge mx-2" />
-          <span className="font-mono text-[11px] uppercase tracking-widest text-dossier-ink/25 mr-1">kind</span>
+          <span className="font-mono text-[11px] uppercase tracking-widest text-dossier-ink/25 mr-1">Kind</span>
           <select
             value={kindFilter}
             onChange={(e) => setKindFilter(e.target.value as ActionKind | "")}
-            className="border border-dossier-paperEdge bg-dossier-stamp px-3 py-1 font-mono text-xs text-dossier-ink/60 outline-none focus:border-dossier-evidenceTape/40 transition-colors"
+            className="border border-dossier-paperEdge bg-dossier-stamp px-3 py-1 text-xs text-dossier-ink/60 outline-none focus:border-dossier-evidenceTape/40 transition-colors"
           >
-            <option value="">any</option>
+            <option value="">Any</option>
             {ACTION_KINDS.map((k) => (
-              <option key={k} value={k}>{k}</option>
+              <option key={k} value={k}>{actionKindLabel(k)}</option>
             ))}
           </select>
           {hasFilters && (
@@ -245,8 +266,8 @@ export default function ActionsPage() {
       {error && !data && <ErrorState error={error} onRetry={refetch} />}
       {error && data && (
         <div className="flex items-center gap-2 border border-cyber-orange/20 bg-cyber-orange/5 px-3 py-2 font-mono text-xs text-cyber-orange">
-          <span>⚠ Last refresh failed — {error.message}</span>
-          <button onClick={refetch} className="ml-auto underline hover:text-dossier-evidenceTape">Retry</button>
+          <span>⚠ Couldn't refresh — {error.message}</span>
+          <button onClick={refetch} className="ml-auto underline hover:text-dossier-evidenceTape">Try again</button>
         </div>
       )}
 
@@ -261,7 +282,7 @@ export default function ActionsPage() {
           hint={
             hasFilters
               ? "No actions match the current filters."
-              : "Actions show up here once CyberCat starts processing incidents. Automated ones run on their own; others need your approval first."
+              : "Nothing here yet. As CyberCat handles incidents, the actions it runs (or proposes for your approval) will appear in this list."
           }
           action={
             hasFilters ? (

@@ -14,6 +14,7 @@ import {
   type Severity,
 } from "../lib/api"
 import { useStream } from "../lib/useStream"
+import { INCIDENT_STATUS_LABELS, SEVERITY_LABELS } from "../lib/labels"
 
 const SEV_COLOR: Record<Severity, string> = {
   critical: "#ff2d55",
@@ -130,8 +131,9 @@ function IncidentRow({
           <span
             className="shrink-0 font-case text-xs font-semibold uppercase tracking-wide hidden sm:block"
             style={{ color: statusColor }}
+            title={INCIDENT_STATUS_LABELS[incident.status].plain}
           >
-            {incident.status}
+            {INCIDENT_STATUS_LABELS[incident.status].label}
           </span>
 
           {/* Event count */}
@@ -239,26 +241,27 @@ export default function IncidentsPage() {
 
       {/* ── Filters ──────────────────────────────────────────────────────── */}
       <div className="flex flex-wrap items-center gap-1.5">
-        <span className="font-mono text-[11px] uppercase tracking-widest text-dossier-ink/25 mr-1">status</span>
+        <span className="font-mono text-[11px] uppercase tracking-widest text-dossier-ink/25 mr-1">Status</span>
         {ALL_STATUSES.map((s) => (
           <Chip
             key={s}
-            label={s}
+            label={INCIDENT_STATUS_LABELS[s].label}
             active={statusFilter.includes(s)}
             color={STATUS_COLOR[s]}
             onClick={() => toggleStatus(s)}
           />
         ))}
         <div className="w-px h-4 bg-dossier-paperEdge mx-2" />
-        <span className="font-mono text-[11px] uppercase tracking-widest text-dossier-ink/25 mr-1">min sev</span>
+        <span className="font-mono text-[11px] uppercase tracking-widest text-dossier-ink/25 mr-1">Severity</span>
         {ALL_SEVERITIES.map((s) => (
-          <Chip
-            key={s}
-            label={SEV_LABEL[s]}
-            active={severityGte === s}
-            color={SEV_COLOR[s]}
-            onClick={() => setSeverityGte((prev) => (prev === s ? "" : s))}
-          />
+          <span key={s} title={SEVERITY_LABELS[s].plain}>
+            <Chip
+              label={SEV_LABEL[s]}
+              active={severityGte === s}
+              color={SEV_COLOR[s]}
+              onClick={() => setSeverityGte((prev) => (prev === s ? "" : s))}
+            />
+          </span>
         ))}
         {hasFilters && (
           <button
@@ -274,8 +277,8 @@ export default function IncidentsPage() {
       {error && !data && <ErrorState error={error} onRetry={refetch} />}
       {error && data && (
         <div className="flex items-center gap-2 border border-cyber-orange/20 bg-cyber-orange/5 px-3 py-2 font-mono text-xs text-cyber-orange">
-          <span>⚠ Last refresh failed — {error.message}</span>
-          <button onClick={refetch} className="ml-auto underline hover:text-dossier-evidenceTape">Retry</button>
+          <span>⚠ Couldn't refresh — {error.message}</span>
+          <button onClick={refetch} className="ml-auto underline hover:text-dossier-evidenceTape">Try again</button>
         </div>
       )}
 
@@ -286,11 +289,11 @@ export default function IncidentsPage() {
         </div>
       ) : allItems.length === 0 ? (
         <EmptyState
-          title={hasFilters ? "No cases match your filters" : "Board is clear"}
+          title={hasFilters ? "No cases match your filters" : "All quiet"}
           hint={
             hasFilters
               ? "Try loosening the filters or clearing them to see everything."
-              : "Nothing here yet. Load the demo data to explore a sample case, or send events to the backend to start monitoring."
+              : "No open cases right now. Load the demo data to see what an incident looks like, or send events to start monitoring."
           }
           action={
             hasFilters ? (

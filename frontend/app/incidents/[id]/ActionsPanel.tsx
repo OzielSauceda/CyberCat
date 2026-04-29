@@ -4,8 +4,16 @@ import { ActionClassificationBadge } from "../../components/ActionClassification
 import { EmptyState } from "../../components/EmptyState"
 import { Panel } from "../../components/Panel"
 import { RelativeTime } from "../../components/RelativeTime"
-import type { ActionSummary } from "../../lib/api"
+import { StatusPill } from "../../components/StatusPill"
+import type { ActionKind, ActionSummary } from "../../lib/api"
+import { ACTION_FORMS } from "../../lib/actionForms"
+import { humanizeKind } from "../../lib/labels"
 import { ActionControls } from "./ActionControls"
+
+function actionKindLabel(kind: string): string {
+  const form = ACTION_FORMS[kind as ActionKind]
+  return form?.label ?? humanizeKind(kind)
+}
 
 interface ActionsPanelProps {
   incidentId: string
@@ -30,34 +38,22 @@ export function ActionsPanel({ incidentId, actions, onMutated, onPropose }: Acti
     >
       {actions.length === 0 ? (
         <EmptyState
-          title="No response actions"
-          hint="Actions appear here when proposed or executed."
+          title="No actions yet"
+          hint="Anything CyberCat does — or proposes for your approval — will show up here."
         />
       ) : (
         <div className="space-y-3">
           {actions.map((a) => (
             <div key={a.id} className="rounded-lg border border-zinc-800 bg-zinc-950 p-3">
               <div className="flex flex-wrap items-center gap-2 mb-1">
-                <span className="font-mono text-xs font-medium text-zinc-200">
-                  {a.kind.replace(/_/g, " ")}
+                <span className="text-xs font-medium text-zinc-200">
+                  {actionKindLabel(a.kind)}
                 </span>
                 <ActionClassificationBadge classification={a.classification} />
-                <span
-                  className={`rounded border px-1.5 py-0.5 text-xs ${
-                    a.status === "executed"
-                      ? "border-emerald-800 bg-emerald-950 text-emerald-300"
-                      : a.status === "failed"
-                        ? "border-red-800 bg-red-950 text-red-300"
-                        : a.status === "reverted"
-                          ? "border-zinc-700 bg-zinc-800 text-zinc-400"
-                          : "border-zinc-700 bg-zinc-800 text-zinc-400"
-                  }`}
-                >
-                  {a.status}
-                </span>
+                <StatusPill status={a.status} />
                 {a.proposed_by === "system" && (
                   <span className="rounded border border-indigo-800 bg-indigo-950 px-1.5 py-0.5 text-xs text-indigo-300">
-                    system
+                    auto
                   </span>
                 )}
                 <span className="ml-auto text-xs text-zinc-500">

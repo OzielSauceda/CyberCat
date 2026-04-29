@@ -188,6 +188,7 @@ async def list_incidents(
             status=inc.status,
             severity=inc.severity,
             confidence=inc.confidence,
+            summary=inc.summary,
             opened_at=inc.opened_at,
             updated_at=inc.updated_at,
             entity_count=entity_count,
@@ -367,6 +368,7 @@ async def get_incident(
         severity=inc.severity,
         confidence=inc.confidence,
         rationale=inc.rationale,
+        summary=inc.summary,
         opened_at=inc.opened_at,
         updated_at=inc.updated_at,
         closed_at=inc.closed_at,
@@ -545,6 +547,7 @@ async def get_recommended_actions(
         RecommendedActionOut(
             kind=r.kind,
             params=r.params,
+            summary=r.summary,
             rationale=r.rationale,
             classification=r.classification,
             classification_reason=r.classification_reason,
