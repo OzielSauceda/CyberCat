@@ -2,13 +2,13 @@
 
 Living status document. Update as reality changes. Short, current, honest.
 
-Last updated: 2026-04-29 — **Phase 18 ✅ CODE COMPLETE.** Site-wide plain-language rewrite. New `frontend/app/lib/labels.ts` + `PlainTerm` component, extended glossary, dashboard/incidents/detail/detections/actions/help all rewritten so non-experts can read the UI without a dictionary. Backend gained `Incident.summary` (Alembic 0008) populated by all three correlator rules + the recommendations engine. Backend tests 174/174 pass (added `test_summary_jargon.py`); frontend typecheck clean; Phase 15 smoke 19/19 pass. Phase 17.8 docs/renumber still outstanding from prior phase.
+Last updated: 2026-04-29 — **Phase 18 ✅ SHIPPED (PR #3 merged to main).** Site-wide plain-language rewrite + redesigned kill-chain ("The route" — stamped stations + "HERE" pulse) and incident timeline ("The reel" — per-layer lanes, playhead sweep, red-string entity threads). New `frontend/app/lib/labels.ts` + `PlainTerm` component, new `lib/timelineLayout.ts` helper, extended glossary, dashboard/incidents/detail/detections/actions/help all rewritten so non-experts can read the UI without a dictionary. Backend gained `Incident.summary` (Alembic 0008) populated by all three correlator rules + the recommendations engine. Backend tests 174/174 pass (added `test_summary_jargon.py`); frontend typecheck clean; Phase 15 smoke 19/19 pass. Phase 17.8 docs/renumber still outstanding from prior phase.
 
 ---
 
 ## Status summary
 
-**Phase:** Phase 17 🔄 IN PROGRESS — sub-phases 17.1–17.7 code complete (typecheck clean), spot-fix pass + 17.8 remaining. Phase 16.10 ✅ FULLY VERIFIED 2026-04-28. Phase 16.9 ✅ FULLY VERIFIED. Phase 16 ✅ FULLY VERIFIED. Phase 15 ✅ FULLY VERIFIED.
+**Phase:** Phase 18 ✅ SHIPPED 2026-04-29 (merged to main via PR #3). Phase 17 🔄 IN PROGRESS — sub-phases 17.1–17.7 code complete (typecheck clean), spot-fix pass + 17.8 docs/renumber remaining. Phase 16.10 ✅ FULLY VERIFIED 2026-04-28. Phase 16.9 ✅ FULLY VERIFIED. Phase 16 ✅ FULLY VERIFIED. Phase 15 ✅ FULLY VERIFIED.
 
 **Overall posture (honest):**
 
@@ -24,24 +24,63 @@ Last updated: 2026-04-29 — **Phase 18 ✅ CODE COMPLETE.** Site-wide plain-lan
 
 ## What needs to happen next session (pick up here)
 
-**Phase 17 is in progress.** Sub-phases 17.1–17.7 are code-complete with 0 typecheck errors. Two things remain before Phase 17 can be marked fully verified:
+**Phase 18 is shipped to main.** Phase 17 still has open items.
 
-1. **Spot-fix aesthetic pass (do first, use `frontend-design` skill)** — Sub-phases 17.2 (NavBar, HelpMenu, CaseBoard, badge components in layout) and 17.3 (welcome `page.tsx`) were built without the `frontend-design` skill. Card bodies and panel interiors fall back to generic zinc (`bg-zinc-900/50`, `bg-zinc-800`) rather than the full dossier warm-paper palette. Invoke `frontend-design:frontend-design` skill, then spot-fix those specific surfaces. The skill MUST be used for all remaining frontend work in this project.
+1. **Phase 17 spot-fix aesthetic pass (use `frontend-design` skill)** — Sub-phases 17.2 (NavBar, HelpMenu, CaseBoard, badge components in layout) and 17.3 (welcome `page.tsx`) were built without the `frontend-design` skill. Card bodies and panel interiors fall back to generic zinc (`bg-zinc-900/50`, `bg-zinc-800`) rather than the full dossier warm-paper palette. Invoke `frontend-design:frontend-design` skill, then spot-fix those specific surfaces. *Note:* the surfaces Phase 18 touched (dashboard, incident detail panels, badges) were rebuilt with the skill in 18.8 and don't need this pass.
 
-2. **Phase 17.8 — Docs, ADR, smoke test, phase renumber** — See `docs/phase-17-plan.md §17.8`. Key items: write `ADR-0014-frontend-detective-redesign.md`, update `docs/runbook.md`, update `Project Brief.md` + `CyberCat-Explained.md`, **renumber** `PROJECT_STATE.md` so the old optional "Phase 17 Go rewrite" → Phase 18 and "Phase 18 token rotation" → Phase 19, write `labs/smoke_test_phase17.sh`.
+2. **Phase 17.8 — Docs, ADR, smoke test** — See `docs/phase-17-plan.md §17.8`. Key items: write `ADR-0014-frontend-detective-redesign.md`, update `Project Brief.md` + `CyberCat-Explained.md`, write `labs/smoke_test_phase17.sh`. The renumber line in the original 17.8 plan is now obsolete (Phase 18 is the plain-language rewrite, not the Go rewrite — see Phase 18 section below).
 
-**After Phase 17 is fully done:**
-- **Phase 18 (optional, renumbered from 17)** — Go rewrite of the agent's hot path.
-- **Phase 19 (optional, renumbered from 18)** — Token rotation + multi-source dedup.
+**Future / optional phases (renumbered to reflect reality):**
+- **Phase 19 (optional)** — Go rewrite of the agent's hot path (was originally pencilled as Phase 17, then 18; bumped because the slot was taken).
+- **Phase 20 (optional)** — Token rotation + multi-source dedup.
 - **Ship-story phase** — README rewrite, demo GIF, public repo prep. Plan at `C:\Users\oziel\.claude\plans\project-state-md-ok-now-that-hashed-allen.md`.
-
-**Note:** The phase renumber (Go rewrite → 18, token rotation → 19) must NOT be done until Phase 17.8 — doing it now would make this document contradict itself before 17.8 writes the new ADR that records the renumber decision.
 
 **Wazuh code deletion is NOT on the roadmap.** It stays as a working alternative source indefinitely.
 
 ---
 
 ## Phase-by-phase state
+
+### Phase 18 — ✅ SHIPPED 2026-04-29 — Plain-Language Rewrite + Kill-Chain & Timeline Redesign
+
+**Plan:** `~/.claude/plans/lets-plan-on-rewriting-iridescent-volcano.md`
+
+**Merged via:** PR #3 (`phase-18-plain-language` → `main`, commit `a5ebef5`).
+
+**What Phase 18 does:** Replaces site-wide cybersecurity jargon and SOC-terminal flair (NOMINAL, AWAITING EVENTS, ACTIVE INTEL, raw rule IDs, ATT&CK technique codes in copy, raw enum values) with plain-language equivalents while preserving the technical detail one tooltip away. Adds an `Incident.summary` field on the data model so the UI can lead with a non-expert summary while keeping the full technical rationale behind a "Show technical detail" expander. Replaces the two densest visualizations on the incident detail page with story-driven designs.
+
+**Approach decisions (durable):**
+- **Hybrid plain-first vocabulary.** Primary copy is plain language; the technical term appears inline as a small muted secondary label *and* on hover via tooltip (combines "see the term" with "learn the meaning on demand"). New `PlainTerm` component implements the pattern; reuses existing `JargonTerm` styling tokens.
+- **Brand voice softened, not removed.** CYBERCAT logotype, dossier theming, neon-on-paper aesthetic preserved. Only alienating phrases ("NOMINAL", "AWAITING EVENTS", "CASE FILE NOT FOUND") were rewritten.
+- **Summary alongside rationale** on incidents and recommendations — not a replacement. CLAUDE.md §2 explainability requirement is preserved (rationale carries technical detail; summary leads UI).
+
+**Sub-phases:**
+
+- **18.1 — Copy infrastructure ✅ 2026-04-29** — `frontend/app/lib/labels.ts` (single source of truth: `SEVERITY_LABELS`, `INCIDENT_STATUS_LABELS`, `INCIDENT_KIND_LABELS`, `EVENT_KIND_LABELS`, `INCIDENT_EVENT_ROLE_LABELS`, `ACTION_CLASSIFICATION_LABELS`, `ACTION_STATUS_LABELS`, `ATTACK_SOURCE_LABELS`, `EVENT_SOURCE_LABELS`, `DETECTION_RULE_SOURCE_LABELS`, `ATTACK_TACTIC_GLOSS`, `humanizeKind` helper). `frontend/app/components/PlainTerm.tsx` (composite: plain primary + muted technical inline + Radix tooltip). `frontend/app/lib/glossary.ts` extended with `incident-kind`, `evidence-kind`, `role-in-incident`, `observable-kind` slugs.
+
+- **18.2 — Backend `summary` field ✅ 2026-04-29** — Alembic `0008_add_incident_summary` adds `incidents.summary TEXT NULL`. `IncidentSummary`, `IncidentDetail`, `RecommendedActionOut` pydantic schemas expose the field. All three correlator rules (`identity_compromise`, `endpoint_compromise_standalone`, `identity_endpoint_chain`) write a plain-language `summary` alongside `rationale`. Recommendations engine adds parallel `_SUMMARIES` map (keyed `(ActionKind, technique-prefix)`) and `_build_summary` helper. Frontend `api.ts` types updated to match.
+
+- **18.3 — Incident detail page rewrite ✅ 2026-04-29** — "What happened" card leads with `incident.summary`; original rationale shows in a `<details>` expander. Event timeline labels via `eventKindLabel`; role badges via `INCIDENT_EVENT_ROLE_LABELS`; tactic glosses via `ATTACK_TACTIC_GLOSS`. `RecommendedActionsPanel` shows `rec.summary` primary, `rec.rationale` in a "Why this works" expander. `ActionsPanel` uses `ACTION_FORMS.label` + `StatusPill` + `ActionClassificationBadge`.
+
+- **18.4 — Dashboard + incidents list ✅ 2026-04-29** — Replacement table for SOC flair: `NOMINAL → "ALL QUIET"`, `AWAITING EVENTS → "WAITING FOR ACTIVITY"`, `ACTIVE INTEL → "Open Cases"`, `LOADING INTEL → "LOADING CASES"`, `ACTIVE INVESTIGATIONS → "CASES BEING WORKED"`, `MITRE ATT&CK AWARE → "MAPPED TO ATT&CK"`, `Threat Level → "Overall Risk"`, etc. Quick Access labels softened. Platform overview card bodies simplified. Incident list filter chips switched to `INCIDENT_STATUS_LABELS` + `SEVERITY_LABELS` with hover plain definitions.
+
+- **18.5 — Detections, actions, navigation, badges ✅ 2026-04-29** — `StatusPill`, `SeverityBadge`, `ActionClassificationBadge` rewritten to pull from `labels.ts` and surface tooltips. Detections/actions pages: filter chip labels via labels.ts, action-kind dropdown uses `ACTION_FORMS.label`. NavBar tooltips softened.
+
+- **18.6 — Help page expansion ✅ 2026-04-29** — `frontend/app/help/page.tsx` automatically renders the 4 new glossary entries via `Object.keys(GLOSSARY).sort()`. Header copy refreshed.
+
+- **18.7 — Tests + verification ✅ 2026-04-29** — `backend/tests/unit/test_summary_jargon.py` asserts every recommended-action `summary` is non-empty, contains no underscored enum values, and no ATT&CK technique codes (`T1xxx`). Backend pytest **174/174**. Frontend typecheck **0 errors**. Phase 15 recommendations smoke **19/19**. Live API check: `GET /v1/incidents` returns plain `summary` field on seeded incidents.
+
+- **18.8 — Kill-chain + timeline redesign ✅ 2026-04-29** (added during review) — invoked `frontend-design` skill before coding (per `feedback_frontend_design_skill`). Replaced `AttackKillChainPanel.tsx` with **"The route"**: only matched tactics shown, stamped circular stations (two-letter monogram, double border, slight per-station tilt), hand-drawn ruled path animates left-to-right via framer-motion, plain gloss + technique chips fade up under each, latest station has pulsing cyan "HERE" tag. Optional "Show all phases →" reveals full 14-tile strip as analyst detail. Replaced `IncidentTimelineViz.tsx` with **"The reel"**: per-layer lanes (identity / session / endpoint / network), empty lanes hidden, playhead sweeps left → right on mount, events fade in as it crosses, triggers and detection-bound events get full inline labels, supporting/context events stay subtle until hover, red dotted "string" threads connect events sharing an entity across lanes (brighten on hover), Replay button re-runs the sweep. New `frontend/app/lib/timelineLayout.ts` (pure helpers: `LAYERS`, `eventLayer`, `buildEntityThreads`, `timeRange`, `buildTicks`). `prefers-reduced-motion` honored throughout.
+
+**Files added:** `frontend/app/lib/labels.ts`, `frontend/app/lib/timelineLayout.ts`, `frontend/app/components/PlainTerm.tsx`, `backend/alembic/versions/0008_add_incident_summary.py`, `backend/tests/unit/test_summary_jargon.py`.
+
+**Files modified (key ones):** `backend/app/db/models.py`, `backend/app/api/schemas/incidents.py`, `backend/app/api/routers/incidents.py`, three correlator rules under `backend/app/correlation/rules/`, `backend/app/response/recommendations.py`, all frontend pages under `frontend/app/`, badge components (`StatusPill`, `SeverityBadge`, `ActionClassificationBadge`), `NavBar.tsx`, `glossary.ts`, `api.ts`, both incident-detail viz panels.
+
+**ADR:** none — Phase 18 is a content/UX initiative, not architectural. Decision recorded here in `PROJECT_STATE.md` instead.
+
+**No phase renumber done.** The Phase 17.8 task to renumber the optional "Phase 18 Go rewrite" → 19 and "Phase 19 token rotation" → 20 is now blocked by reality: this PROJECT_STATE.md and the merged PR #3 both refer to **Phase 18 = plain-language rewrite + viz redesign**. Future Go-rewrite work should be Phase 19 (or higher) when it lands. The renumber section in 17.8 is therefore stale and should be dropped when 17.8 is done.
+
+---
 
 ### Phase 17 — 🔄 IN PROGRESS — Detective Console: Frontend Redesign
 
