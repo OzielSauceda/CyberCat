@@ -185,7 +185,7 @@ export default function DetectionsPage() {
           )}
         </div>
         {error instanceof ApiError && (
-          <span className="text-xs text-amber-400">Backend unreachable — showing cached data</span>
+          <span className="text-xs text-amber-400">Can&apos;t reach the backend — showing last saved data</span>
         )}
       </div>
 
@@ -270,7 +270,7 @@ export default function DetectionsPage() {
       ) : allItems.length === 0 ? (
         <EmptyState
           title="No detections yet"
-          hint={hasFilters ? "No detections match the current filters." : "Seed events via POST /v1/events/raw to trigger detectors."}
+          hint={hasFilters ? "No detections match the current filters." : "Events haven't arrived yet. Start the agent or send events through the API to see detection rules fire."}
           action={
             hasFilters ? (
               <button

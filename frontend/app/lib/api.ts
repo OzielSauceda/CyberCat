@@ -249,6 +249,24 @@ export function getIncident(id: string): Promise<IncidentDetail> {
 }
 
 // ---------------------------------------------------------------------------
+// Recommended response actions — Phase 15
+// ---------------------------------------------------------------------------
+
+export interface RecommendedAction {
+  kind: ActionKind
+  params: Record<string, unknown>
+  rationale: string
+  classification: ActionClassification
+  classification_reason: string
+  priority: number
+  target_summary: string
+}
+
+export function getRecommendedActions(incidentId: string): Promise<RecommendedAction[]> {
+  return request<RecommendedAction[]>(`/v1/incidents/${incidentId}/recommended-actions`)
+}
+
+// ---------------------------------------------------------------------------
 // Write paths — Phase 5b
 // ---------------------------------------------------------------------------
 
@@ -529,6 +547,22 @@ export interface BlockedObservable {
 
 export interface BlockedObservableList {
   items: BlockedObservable[]
+}
+
+// ---------------------------------------------------------------------------
+// Demo data — Phase 17.6
+// ---------------------------------------------------------------------------
+
+export interface DemoStatus {
+  active: boolean
+}
+
+export function getDemoStatus(): Promise<DemoStatus> {
+  return request<DemoStatus>("/v1/admin/demo-status")
+}
+
+export function wipeDemoData(): Promise<void> {
+  return request<void>("/v1/admin/demo-data", { method: "DELETE" })
 }
 
 export function listBlockedObservables(params?: { active?: boolean; value?: string }): Promise<BlockedObservableList> {

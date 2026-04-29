@@ -176,7 +176,7 @@ export default function LabPage() {
       <div className="mb-6">
         <h1 className="text-xl font-semibold text-zinc-100">Lab Assets</h1>
         <p className="mt-0.5 text-sm text-zinc-500">
-          Registered in-scope assets for response policy evaluation.
+          Only assets listed here can be targeted by automated response actions. Nothing outside this list gets touched.
         </p>
       </div>
 
@@ -210,7 +210,7 @@ export default function LabPage() {
           ) : filtered.length === 0 ? (
             <EmptyState
               title="No assets registered"
-              hint={kindFilter ? "No assets match this kind filter." : "Add assets using the form on the right."}
+              hint={kindFilter ? "No assets match this kind filter." : "Use the form on the right to add users, hosts, IPs, or observables you want CyberCat to be able to act on."}
             />
           ) : (
             <div className="rounded-lg border border-zinc-800 overflow-hidden">
@@ -283,7 +283,7 @@ export default function LabPage() {
       <ConfirmDialog
         open={deleteTarget !== null}
         title={`Remove ${deleteTarget?.kind}:${deleteTarget?.natural_key}?`}
-        body="Actions referencing this asset will fail their scope check after removal."
+        body="Any automated actions targeting this asset will stop working once it's removed."
         confirmLabel="Remove"
         danger
         pending={deletePending}

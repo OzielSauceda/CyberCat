@@ -5,15 +5,15 @@ import { useEffect } from "react"
 import { useSession } from "../lib/SessionContext"
 
 const ROLE_LABELS: Record<string, string> = {
-  admin: "Admin",
-  analyst: "Analyst",
-  read_only: "Read-only",
+  admin: "ADMIN",
+  analyst: "ANALYST",
+  read_only: "READ-ONLY",
 }
 
 const ROLE_COLORS: Record<string, string> = {
-  admin: "border-indigo-700 text-indigo-400",
-  analyst: "border-emerald-700 text-emerald-400",
-  read_only: "border-zinc-600 text-zinc-400",
+  admin: "border-indigo-700/60 text-indigo-400/90",
+  analyst: "border-emerald-800/60 text-emerald-500/90",
+  read_only: "border-dossier-paperEdge text-dossier-ink/50",
 }
 
 export default function UserBadge() {
@@ -32,13 +32,13 @@ export default function UserBadge() {
   }, [status, authConfig, router, pathname])
 
   if (status === "loading") {
-    return <span className="h-5 w-24 animate-pulse rounded bg-zinc-800" />
+    return <span className="h-5 w-28 animate-pulse rounded bg-dossier-paperEdge/60" />
   }
 
   if (status === "anon" || !user) return null
 
-  const roleLabel = ROLE_LABELS[user.role] ?? user.role
-  const roleColor = ROLE_COLORS[user.role] ?? "border-zinc-600 text-zinc-400"
+  const roleLabel = ROLE_LABELS[user.role] ?? user.role.toUpperCase()
+  const roleColor = ROLE_COLORS[user.role] ?? "border-dossier-paperEdge text-dossier-ink/50"
 
   const handleSignOut = async () => {
     await logout()
@@ -50,17 +50,17 @@ export default function UserBadge() {
   return (
     <div className="flex items-center gap-2">
       <span
-        className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${roleColor}`}
+        className={`inline-flex items-center rounded border px-2 py-0.5 text-[11px] font-mono tracking-wide ${roleColor}`}
       >
         {roleLabel}
       </span>
-      <span className="text-xs text-zinc-400">{user.email}</span>
+      <span className="text-[11px] font-mono text-dossier-ink/50 tracking-wide">{user.email}</span>
       {authConfig?.auth_required && (
         <button
           onClick={handleSignOut}
-          className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+          className="text-[11px] font-mono text-dossier-ink/30 transition-colors hover:text-dossier-ink/70 tracking-wide"
         >
-          Sign out
+          SIGN·OUT
         </button>
       )}
     </div>

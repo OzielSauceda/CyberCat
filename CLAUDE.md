@@ -49,9 +49,11 @@ Do not introduce Kafka, Temporal, ClickHouse, Elastic, full OpenCTI, Kubernetes,
 
 ## 6. Custom-Built vs Integrated
 
-**Custom (we own, we build):** internal event/entity schema, normalization layer, correlation engine, incident model + lifecycle, response policy engine, product APIs, analyst UI, ATT&CK mapping glue, evidence model.
+**Custom (we own, we build):** internal event/entity schema, normalization layer, correlation engine, incident model + lifecycle, response policy engine, product APIs, analyst UI, ATT&CK mapping glue, evidence model, **and (since Phase 16) the default telemetry agent** (`agent/`, `cct-agent` container) which tails sshd events directly into the canonical event shape.
 
-**Integrated (consumed, not rebuilt):** Wazuh (telemetry), Sigma (rule format + parsers), MITRE ATT&CK reference data, Postgres, Redis.
+**Integrated (consumed, not rebuilt):** Wazuh (alternative telemetry source + Active Response dispatch), Sigma (rule format + parsers), MITRE ATT&CK reference data, Postgres, Redis.
+
+The telemetry layer is **pluggable**: agent and Wazuh are interchangeable as ingest sources, and downstream code is source-agnostic (keys on `EventSource` enum, not on adapter specifics). Agent is default; Wazuh is opt-in via `--profile wazuh`. **Both stay supported indefinitely** — Wazuh remains the only path for real OS-level Active Response (`iptables`, `kill -9`); the agent is telemetry-only by design. See ADR-0011.
 
 When a decision is ambiguous, prefer "build it custom in the app layer" over "bolt on another tool."
 

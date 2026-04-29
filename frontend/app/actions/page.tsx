@@ -203,7 +203,7 @@ export default function ActionsPage() {
           )}
         </div>
         <p className="text-xs text-zinc-600">
-          Execute / Revert actions on the incident detail page.
+          To run or undo actions, open an incident and use the Response tab.
         </p>
       </div>
 
@@ -321,7 +321,7 @@ export default function ActionsPage() {
           hint={
             hasFilters
               ? "No actions match the current filters."
-              : "Response actions appear here once incidents are correlated and auto-actions execute."
+              : "Actions show up here once CyberCat starts processing incidents. Automated ones run on their own; others need your approval first."
           }
           action={
             hasFilters ? (

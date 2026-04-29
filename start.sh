@@ -2,8 +2,71 @@
 set -e
 
 COMPOSE_FILE="infra/compose/docker-compose.yml"
+ENV_FILE="infra/compose/.env"
+ENV_EXAMPLE="infra/compose/.env.example"
 DOCKER_DESKTOP="/c/Program Files/Docker/Docker/Docker Desktop.exe"
 
+# ----------------------------------------------------------------------------
+# Parse args. Supported flags:
+#   --profile <name>    (repeatable; e.g. --profile agent --profile wazuh)
+#   --profile=<name>
+# Anything else is forwarded to the eventual `docker compose up`.
+# ----------------------------------------------------------------------------
+PROFILES=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --profile)
+      shift
+      if [ $# -gt 0 ]; then
+        PROFILES+=("$1")
+        shift
+      fi
+      ;;
+    --profile=*)
+      PROFILES+=("${1#--profile=}")
+      shift
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+
+# Default profile (Phase 16.6): if no --profile was given, run with `agent`.
+# That brings up the custom telemetry agent and lab-debian. Wazuh is now
+# opt-in via `--profile wazuh`. See docs/decisions/ADR-0011-direct-agent-telemetry.md.
+WAZUH_BANNER=1
+if [ ${#PROFILES[@]} -eq 0 ]; then
+  PROFILES=("agent")
+  WAZUH_BANNER=1
+fi
+
+# Suppress the Wazuh banner only when wazuh is one of the active profiles.
+for p in "${PROFILES[@]}"; do
+  if [ "$p" = "wazuh" ]; then
+    WAZUH_BANNER=0
+  fi
+done
+
+if [ "$WAZUH_BANNER" = "1" ]; then
+  echo "Telemetry: cct-agent (custom). Wazuh is opt-in — pass --profile wazuh to enable it."
+fi
+
+PROFILE_FLAGS=()
+for p in "${PROFILES[@]}"; do
+  PROFILE_FLAGS+=(--profile "$p")
+done
+
+agent_profile_active() {
+  for p in "${PROFILES[@]}"; do
+    if [ "$p" = "agent" ]; then return 0; fi
+  done
+  return 1
+}
+
+# ----------------------------------------------------------------------------
+# Docker Desktop bringup (Windows convenience)
+# ----------------------------------------------------------------------------
 if ! docker info >/dev/null 2>&1; then
   echo "Docker engine not reachable — launching Docker Desktop..."
   if [ -x "$DOCKER_DESKTOP" ]; then
@@ -30,11 +93,80 @@ if ! docker info >/dev/null 2>&1; then
   done
 fi
 
+# ----------------------------------------------------------------------------
+# Bring up the stack
+# ----------------------------------------------------------------------------
 echo "Bringing up CyberCat stack..."
-docker compose -f "$COMPOSE_FILE" up -d
+docker compose -f "$COMPOSE_FILE" "${PROFILE_FLAGS[@]}" up -d
+
+# ----------------------------------------------------------------------------
+# First-run cct-agent token bootstrap (only if --profile agent is active)
+# ----------------------------------------------------------------------------
+if agent_profile_active; then
+  current_token=""
+  if [ -f "$ENV_FILE" ]; then
+    current_token=$(grep "^CCT_AGENT_TOKEN=" "$ENV_FILE" 2>/dev/null | head -1 | sed 's/^CCT_AGENT_TOKEN=//')
+  fi
+
+  if [ -z "$current_token" ]; then
+    echo
+    echo "First-run: provisioning cct-agent API token..."
+
+    # Wait for backend /healthz
+    for i in {1..40}; do
+      if docker compose -f "$COMPOSE_FILE" exec -T backend curl -sf http://localhost:8000/healthz >/dev/null 2>&1; then
+        break
+      fi
+      sleep 2
+    done
+
+    # Ensure cct-agent@local user exists (idempotent — ignore "already exists" failure)
+    set +e
+    docker compose -f "$COMPOSE_FILE" exec -T backend python -m app.cli create-user \
+      --email cct-agent@local \
+      --password "$(openssl rand -hex 24 2>/dev/null || head -c 48 /dev/urandom | base64 | head -c 32)" \
+      --role analyst >/dev/null 2>&1
+    set -e
+
+    # Issue a token
+    issue_output=$(docker compose -f "$COMPOSE_FILE" exec -T backend python -m app.cli issue-token \
+      --email cct-agent@local --name cct-agent 2>&1) || {
+      echo "ERROR: failed to issue cct-agent token:"
+      echo "$issue_output"
+      exit 1
+    }
+
+    # Parse the "  token: <plaintext>" line.
+    token=$(echo "$issue_output" | sed -nE 's/^[[:space:]]+token:[[:space:]]+(.+)$/\1/p' | head -1 | tr -d '\r')
+    if [ -z "$token" ]; then
+      echo "ERROR: could not parse issued token from CLI output:"
+      echo "$issue_output"
+      exit 1
+    fi
+
+    # Ensure .env exists, then upsert CCT_AGENT_TOKEN
+    if [ ! -f "$ENV_FILE" ]; then
+      if [ -f "$ENV_EXAMPLE" ]; then
+        cp "$ENV_EXAMPLE" "$ENV_FILE"
+      else
+        : > "$ENV_FILE"
+      fi
+    fi
+    if grep -q "^CCT_AGENT_TOKEN=" "$ENV_FILE" 2>/dev/null; then
+      sed -i.bak "s|^CCT_AGENT_TOKEN=.*|CCT_AGENT_TOKEN=$token|" "$ENV_FILE"
+      rm -f "${ENV_FILE}.bak"
+    else
+      echo "CCT_AGENT_TOKEN=$token" >> "$ENV_FILE"
+    fi
+
+    echo "✓ Token written to $ENV_FILE"
+    echo "  Recreating cct-agent with the new token..."
+    docker compose -f "$COMPOSE_FILE" "${PROFILE_FLAGS[@]}" up -d --force-recreate cct-agent
+  fi
+fi
 
 echo
-docker compose -f "$COMPOSE_FILE" ps
+docker compose -f "$COMPOSE_FILE" "${PROFILE_FLAGS[@]}" ps
 
 echo
 echo "UI:        http://localhost:3000/incidents"

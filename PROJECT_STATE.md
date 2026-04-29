@@ -2,13 +2,13 @@
 
 Living status document. Update as reality changes. Short, current, honest.
 
-Last updated: 2026-04-28 — Phase 15.1 complete. Recommender engine + `GET /v1/incidents/{id}/recommended-actions` endpoint shipped. `pytest` 173/173 ✅. Phases 1–14 fully verified; Phase 15.1 backend verified.
+Last updated: 2026-04-28 — **Phase 17.7 ⚠ CODE COMPLETE, SPOT-FIX PENDING.** Sub-phases 17.1–17.7 all shipped (typecheck 0 errors). 17.8 (docs/ADR/smoke/renumber) still outstanding. A spot-fix aesthetic pass on 17.2 (NavBar, HelpMenu) and 17.3 (welcome page) is queued — those sub-phases were built without the `frontend-design` skill and card bodies fall back to generic zinc rather than full dossier palette. The skill must be invoked for the spot-fix and all remaining frontend work.
 
 ---
 
 ## Status summary
 
-**Phase:** Phase 15 🔄 IN PROGRESS. Sub-phase 15.1 (backend recommender + endpoint) complete and test-verified 2026-04-28. Sub-phases 15.2 (frontend plumbing), 15.3 (RecommendedActionsPanel), 15.4 (smoke + docs) pending. Phase 14 ✅ FULLY VERIFIED.
+**Phase:** Phase 17 🔄 IN PROGRESS — sub-phases 17.1–17.7 code complete (typecheck clean), spot-fix pass + 17.8 remaining. Phase 16.10 ✅ FULLY VERIFIED 2026-04-28. Phase 16.9 ✅ FULLY VERIFIED. Phase 16 ✅ FULLY VERIFIED. Phase 15 ✅ FULLY VERIFIED.
 
 **Overall posture (honest):**
 
@@ -24,13 +24,274 @@ Last updated: 2026-04-28 — Phase 15.1 complete. Recommender engine + `GET /v1/
 
 ## What needs to happen next session (pick up here)
 
-**Phase 15.1 is complete.** Backend recommender engine + endpoint verified. 173/173 tests green.
+**Phase 17 is in progress.** Sub-phases 17.1–17.7 are code-complete with 0 typecheck errors. Two things remain before Phase 17 can be marked fully verified:
 
-Next up: **Phase 15.2** — frontend plumbing: add `getRecommendedActions()` to `api.ts`, add `prefill` prop to `ProposeActionModal`. Then 15.3 (RecommendedActionsPanel + page integration), then 15.4 (smoke script + PROJECT_STATE update). See `docs/phase-15-plan.md`.
+1. **Spot-fix aesthetic pass (do first, use `frontend-design` skill)** — Sub-phases 17.2 (NavBar, HelpMenu, CaseBoard, badge components in layout) and 17.3 (welcome `page.tsx`) were built without the `frontend-design` skill. Card bodies and panel interiors fall back to generic zinc (`bg-zinc-900/50`, `bg-zinc-800`) rather than the full dossier warm-paper palette. Invoke `frontend-design:frontend-design` skill, then spot-fix those specific surfaces. The skill MUST be used for all remaining frontend work in this project.
+
+2. **Phase 17.8 — Docs, ADR, smoke test, phase renumber** — See `docs/phase-17-plan.md §17.8`. Key items: write `ADR-0014-frontend-detective-redesign.md`, update `docs/runbook.md`, update `Project Brief.md` + `CyberCat-Explained.md`, **renumber** `PROJECT_STATE.md` so the old optional "Phase 17 Go rewrite" → Phase 18 and "Phase 18 token rotation" → Phase 19, write `labs/smoke_test_phase17.sh`.
+
+**After Phase 17 is fully done:**
+- **Phase 18 (optional, renumbered from 17)** — Go rewrite of the agent's hot path.
+- **Phase 19 (optional, renumbered from 18)** — Token rotation + multi-source dedup.
+- **Ship-story phase** — README rewrite, demo GIF, public repo prep. Plan at `C:\Users\oziel\.claude\plans\project-state-md-ok-now-that-hashed-allen.md`.
+
+**Note:** The phase renumber (Go rewrite → 18, token rotation → 19) must NOT be done until Phase 17.8 — doing it now would make this document contradict itself before 17.8 writes the new ADR that records the renumber decision.
+
+**Wazuh code deletion is NOT on the roadmap.** It stays as a working alternative source indefinitely.
 
 ---
 
 ## Phase-by-phase state
+
+### Phase 17 — 🔄 IN PROGRESS — Detective Console: Frontend Redesign
+
+**Plan:** `docs/phase-17-plan.md`
+
+**What Phase 17 does:** Redesigns the frontend around a "detective / case-file" motif. New visual language (dossier tokens), welcome landing page, glossary + JargonTerm tooltip system, first-run guided tour, auto-seed demo data on first boot, and full case-file restyle of working views.
+
+**Sub-phases:**
+
+- **17.1 — Design system foundation ✅ 2026-04-28** — `tailwind.config.ts` extended with `dossier.*` color tokens, `font-case`, `shadow-dossier`, `bg-foldermark`. `frontend/app/lib/theme-tokens.ts` created. `globals.css` imports Special Elite font via `next/font/google`. Deps added: `framer-motion`, `@radix-ui/react-tooltip`, `@radix-ui/react-dialog`, `@radix-ui/react-popover`, `@radix-ui/react-dropdown-menu`.
+
+- **17.2 — Case-file shell ✅ 2026-04-28** — `layout.tsx` rebuilt with dossier nav. New components: `NavBar.tsx` (icon+tooltip links), `HelpMenu.tsx` (Radix Popover), `CaseBoard.tsx` (left-accent wrapper). `StreamStatusBadge`, `UserBadge`, `WazuhBridgeBadge` restyled. ⚠ Built without `frontend-design` skill — card/panel bodies use generic zinc; spot-fix queued.
+
+- **17.3 — Welcome landing page ✅ 2026-04-28** — `frontend/app/page.tsx` fully rewritten. Sections: header strip, "What CyberCat does / isn't / flow" cards, Get Started cards, Live Status, first-time user CTA + tour trigger. ⚠ Built without `frontend-design` skill — info cards use `bg-zinc-900/50`; spot-fix queued.
+
+- **17.4 — Glossary system ✅ 2026-04-28** — `frontend/app/lib/glossary.ts` (~30 terms), `JargonTerm.tsx` (dotted-underline Radix Tooltip), `frontend/app/help/page.tsx` (full glossary with anchors). `<JargonTerm>` applied across incidents, detections, actions, entities pages.
+
+- **17.5 — First-run guided tour ✅ 2026-04-28** — `FirstRunTour.tsx` — 3-step Radix Dialog overlay with framer-motion highlight ring. `localStorage` flag prevents auto-replay; HelpMenu exposes "Restart tour".
+
+- **17.6 — Auto-seed demo data ✅ 2026-04-28** — `backend/app/main.py` startup hook (`CCT_AUTOSEED_DEMO`), advisory lock + `seed_marker`. `backend/app/api/admin.py` — `DELETE /v1/admin/demo-data` (TRUNCATE CASCADE). `DemoDataBanner.tsx` frontend banner. `.env.example` + `docker-compose.yml` wired.
+
+- **17.7 — Case-file restyle of working views ✅ 2026-04-28** — All primitive components restyled to dossier tokens (`SeverityBadge` stamp look, `StatusPill` uppercase tracking, `Panel` warm dark bg, `EmptyState` case-file copy). Viz panels get legends (`AttackKillChainPanel` R/C legend, `IncidentTimelineViz` header dossier-restyled, `EntityGraphPanel` entity kind legend). Incident list → dossier rows (case #, severity stamp, evidence strip). Incident detail → case header with "CASE FILE · #ID" crown + timestamp strip + "Summary of Findings" inset. `tsc --noEmit` → **0 errors**. ⚠ Built without `frontend-design` skill — see spot-fix note in "What needs to happen next session".
+
+- **17.8 — Docs, ADR, smoke test, renumber ⏳ NOT STARTED** — ADR-0014, runbook update, Project Brief + CyberCat-Explained updates, PROJECT_STATE.md phase renumber (Go rewrite → 18, token rotation → 19), `labs/smoke_test_phase17.sh`.
+
+---
+
+### Phase 16.10 — ✅ FULLY VERIFIED 2026-04-28 — conntrack network telemetry (`network.connection`)
+
+**What Phase 16.10 does:** Adds a third tail source to the custom agent for `/var/log/conntrack.log`, written by `conntrack -E -e NEW -o timestamp -o extended -o id` running inside lab-debian (under its existing `NET_ADMIN` capability). Stateless single-line parser emits `network.connection` events from `[NEW]` records only; loopback and link-local traffic is dropped at the parser. After 16.10, `./start.sh` (default agent profile, no Wazuh) covers identity, endpoint, AND outbound-network signals end-to-end. The existing `py.blocked_observable_match` detector now fires on lab-debian's outbound traffic against blocked IPs, closing the `block_observable → enforcement → detection` loop.
+
+**ADR:** `docs/decisions/ADR-0013-conntrack-network-telemetry.md`.
+
+**Sub-phases:**
+
+- **16.10.1 — ADR + lab-debian conntrack install ✅ 2026-04-28**
+  - `docs/decisions/ADR-0013-conntrack-network-telemetry.md` written. Records: event scope ([NEW] only), source mechanism (conntrack -E inside lab-debian, file handoff via lab_logs volume), no `--privileged`, stateless parser.
+  - `infra/lab-debian/Dockerfile` — added `conntrack` (the `conntrack-tools` package) to the apt-get list.
+  - `infra/lab-debian/entrypoint.sh` — touches `/var/log/conntrack.log` and spawns `conntrack -E -e NEW -o timestamp -o extended -o id` in the background, wrapped in `( ... ) || true` for graceful degradation when kernel netlink is unavailable.
+  - Verify: `docker exec compose-lab-debian-1 which conntrack` → `/usr/sbin/conntrack`; `/var/log/conntrack.log` exists and shows live `[NEW]` lines on Linux hosts.
+
+- **16.10.2 — conntrack parser ✅ 2026-04-28**
+  - `agent/cct_agent/parsers/conntrack.py` — stateless `parse_line(line) -> ParsedNetworkEvent | None`. Recognises TCP/UDP/ICMP `[NEW]` records, drops `[UPDATE]`/`[DESTROY]`, drops loopback (`127.0.0.0/8`, `::1`) and link-local (`169.254/16`, `fe80::/10`), drops other protos (`igmp`, `gre`). Uses the original-direction tuple (first `src=`/`dst=`/`sport=`/`dport=` occurrence). Conntrack `id=` extracted when present; falls back to SHA256 of the raw line for dedupe. ICMP records synthesize port pair as `(0, type)`.
+  - `agent/tests/fixtures/conntrack_new.log` — 6 lines (TCP+id, TCP, UDP, ICMP, loopback, malformed).
+  - `agent/tests/test_conntrack_parser.py` — 16 tests: TCP/UDP/ICMP NEW parsed, loopback/link-local v4+v6 dropped, malformed/empty returns None, [UPDATE]/[DESTROY] dropped, IGMP/GRE dropped, timestamp UTC, raw line preserved, format without address-family token, RFC1918 traffic kept, conntrack id extracted.
+  - **Verification:** `pytest tests/test_conntrack_parser.py` → 16/16. Full agent suite **108/108** (92 prior + 16 new).
+
+- **16.10.3 — Event builder dispatch ✅ 2026-04-28**
+  - `agent/cct_agent/events.py` — `build_event()` dispatches `ParsedNetworkEvent` to new `_network_event()` builder. Required fields per `backend/app/ingest/normalizer.py:13`: `{host, src_ip, dst_ip, dst_port, proto}`. Dedupe key `direct:network.connection:{conntrack_id}:{src_ip}:{dst_ip}:{dst_port}` when id present, else `direct:network.connection:{sha256[:16]}`.
+  - `agent/tests/test_events_network.py` — 10 tests validating output against the live `RawEventIn` schema and `validate_normalized()`.
+  - **Verification:** full agent suite **118/118** (108 + 10).
+
+- **16.10.4 — Multi-source orchestration ✅ 2026-04-28**
+  - `agent/cct_agent/config.py` — added `conntrack_log_path`, `conntrack_checkpoint_path`, `conntrack_enabled` settings (env: `CCT_CONNTRACK_LOG_PATH`, `CCT_CONNTRACK_CHECKPOINT_PATH`, `CCT_CONNTRACK_ENABLED`).
+  - `agent/cct_agent/__main__.py` — added `_run_conntrack_source()` coroutine + `conntrack_source_active(config)` helper (mirrors `audit_source_active`). Banner extended to `agent ready, tailing /lab/var/log/auth.log + /lab/var/log/audit/audit.log + /lab/var/log/conntrack.log`. Module docstring topology diagram updated to show three legs.
+  - `agent/tests/test_main_orchestration.py` — 4 new tests for the conntrack gating helper + default config.
+  - **Verification:** full agent suite **122/122** (118 + 4 orchestration).
+
+- **16.10.5 — Compose integration ✅ 2026-04-28**
+  - `infra/compose/docker-compose.yml` — added `CCT_CONNTRACK_LOG_PATH`, `CCT_CONNTRACK_CHECKPOINT_PATH`, `CCT_CONNTRACK_ENABLED` to `cct-agent.environment`. Reuses the existing `lab_logs:/lab/var/log:ro` mount; no new volumes.
+  - `infra/compose/.env.example` — documented `CCT_CONNTRACK_ENABLED` under the existing cct-agent block.
+  - **Verification:** `docker compose --profile agent up -d --force-recreate cct-agent`; `docker logs compose-cct-agent-1` confirms three sources tailing.
+
+- **16.10.6 — End-to-end smoke test ✅ 2026-04-28**
+  - `labs/smoke_test_phase16_10.sh` (18 assertions): containers up, conntrack.log exists, agent banner shows three sources, DB+Redis cleared, blocked observable seeded into Redis cache (`cybercat:blocked_observables:active` — bypasses the actions FK chain that the cache also satisfies on cache miss), 3 synthetic conntrack lines injected (TCP→blocked dst, UDP→clean, loopback→dropped), backend has ≥2 `network.connection` events, loopback NOT in events, src_ip entity extracted, `py.blocked_observable_match` fires with `matched_field=dst_ip` `matched_value=203.0.113.42`, Wazuh dormant, conntrack-checkpoint advanced.
+  - Synthetic injection rationale documented in script header (Docker Desktop on Windows / WSL2 may not expose `nf_conntrack` netlink — same constraint as auditd, ADR-0012).
+  - **Verification:** `bash labs/smoke_test_phase16_10.sh` → **18/18 ✅**. Regression: `smoke_test_phase16_9.sh` 15/15 ✅, `smoke_test_agent.sh` 14/14 ✅. Backend pytest **173/173 ✅**.
+
+- **16.10.7 — Documentation + memory note ✅ 2026-04-28**
+  - `docs/architecture.md` — Telemetry sources section extended to three tail loops, per-source kind table added.
+  - `docs/runbook.md` — env-var table extended with `CCT_CONNTRACK_*`; new "Conntrack source operations" subsection.
+  - `Project Brief.md` — telemetry paragraph updated: agent now covers identity, endpoint, AND outbound-network.
+  - `PROJECT_STATE.md` — this entry.
+  - Memory: `project_phase16_10.md` + index entry in `MEMORY.md`.
+
+### Phase 16.9 — ✅ FULLY VERIFIED 2026-04-28 — auditd process telemetry (`process.created` + `process.exited`)
+
+**What Phase 16.9 does:** Extends the custom agent to tail `/var/log/audit/audit.log` inside lab-debian in addition to `/var/log/auth.log`. Parses auditd EXECVE+SYSCALL record groups into canonical `process.created` events and exit_group records into `process.exited` events. After 16.9, `./start.sh` (default agent profile, no Wazuh) is sufficient for both the identity-compromise and endpoint-compromise demos — completing the original Phase 16 promise.
+
+**ADR:** `docs/decisions/ADR-0012-auditd-process-telemetry.md`.
+
+**Sub-phases:**
+
+- **16.9.1 — ADR + audit rule extension ✅ 2026-04-28**
+  - `docs/decisions/ADR-0012-auditd-process-telemetry.md` written. Records: event scope (process.created always, process.exited tracked-PID only), no `--privileged` reasoning, exit_group rule rationale, dual-tail topology.
+  - `infra/lab-debian/audit.rules` — added `-a always,exit -F arch=b64 -S exit_group -k cybercat_exit` alongside the existing `cybercat_exec` rule.
+  - Verify: `docker exec compose-lab-debian-1 auditctl -l` lists both `cybercat_exec` and `cybercat_exit`.
+
+- **16.9.2 — auditd parser ✅ 2026-04-28**
+  - `agent/cct_agent/parsers/auditd.py` — `AuditdParser` stateful class (buffers lines by `audit(ts:event_id)`, flushes on EOE or 100-line cap) + `ParsedProcessEvent` dataclass. Handles SYSCALL/EXECVE/PATH/PROCTITLE record types; hex-decoded argv; PATH item=0 image fallback; syscall 59=execve → process.created, 231=exit_group → process.exited.
+  - `agent/tests/fixtures/audit_execve.log` — 5 EXECVE events (bash, python3, sh with hex args, winword.exe, ls with PATH-only image fallback).
+  - `agent/tests/fixtures/audit_exit.log` — 2 exit_group events (exit=0, exit=137).
+  - `agent/tests/test_auditd_parser.py` — 23 tests: assembled execve, missing PROCTITLE, hex argv, PATH fallback, multi-event interleaving (EOE-based), malformed lines, non-execve syscall skipped, exit_group (clean+abnormal), flush(), 100-line cap, fixture-driven counts + hex fixture decode + UTC timestamps.
+  - **Verification:** `cd agent && pytest tests/test_auditd_parser.py` → 23/23 ✅. Full agent suite `pytest` → **67/67** ✅ (44 prior + 23 new). Backend pytest unchanged: **173/173** ✅.
+
+- **16.9.3 — TrackedProcesses + event builder dispatch ✅ 2026-04-28**
+  - `agent/cct_agent/process_state.py` — `TrackedProcesses` (`OrderedDict`-based bounded LRU, 4096 cap) + `ProcessRecord` dataclass. `record(event)` enriches `process.created` with `parent_image` from a prior PID lookup; `resolve_exit(event)` returns the (enriched) event on hit, `None` (debug-logged) on miss.
+  - `agent/cct_agent/events.py` — `build_event()` dispatches on dataclass type (`ParsedEvent` vs `ParsedProcessEvent`); new `_process_event()` builds RawEventIn-shaped dicts with `dedupe_key=f"direct:{kind}:{audit_event_id}:{pid}"`.
+  - `agent/tests/test_process_state.py` (13 tests) + `agent/tests/test_events_process.py` (8 tests, validates output against the live `RawEventIn` schema and `validate_normalized()`).
+  - **Verification:** full agent suite **88/88** ✅.
+
+- **16.9.4 — Multi-source orchestration ✅ 2026-04-28**
+  - `agent/cct_agent/config.py` — added `audit_log_path`, `audit_checkpoint_path`, `audit_enabled` settings (env: `CCT_AUDIT_LOG_PATH`, `CCT_AUDIT_CHECKPOINT_PATH`, `CCT_AUDIT_ENABLED`).
+  - `agent/cct_agent/__main__.py` — refactored from a single tail loop into `_run_sshd_source()` + `_run_auditd_source()` coroutines, both feeding the shared `Shipper`. Spawns each as an independent asyncio task. New `audit_source_active(config)` helper gates the auditd source on `audit_enabled` AND `audit_log_path.exists()` at startup; logs a warning and degrades gracefully when missing. Banner extended to `agent ready, tailing /lab/var/log/auth.log + /lab/var/log/audit/audit.log`.
+  - `agent/tests/test_main_orchestration.py` (4 tests for the gating helper + default config).
+  - **Verification:** full agent suite **92/92** ✅ (88 + 4 orchestration).
+
+- **16.9.5 — Compose integration ✅ 2026-04-28**
+  - `infra/compose/docker-compose.yml` — added `CCT_AUDIT_LOG_PATH`, `CCT_AUDIT_CHECKPOINT_PATH`, `CCT_AUDIT_ENABLED` to `cct-agent.environment`. The `lab_logs:/lab/var/log:ro` mount already exposes `/var/log/audit/`; no new volumes needed.
+  - `infra/compose/.env.example` — documented `CCT_AUDIT_ENABLED` under the existing cct-agent block.
+  - **Verification:** rebuilt + recreated `cct-agent`; banner shows `tailing /lab/var/log/auth.log + /lab/var/log/audit/audit.log`.
+
+- **16.9.6 — End-to-end smoke test ✅ 2026-04-28**
+  - `labs/smoke_test_phase16_9.sh` — 11-step assertion harness. Injects synthetic auditd records (parent execve `winword.exe` → child execve `cmd.exe` → child exit_group) into the `lab_logs`-shared `/var/log/audit/audit.log`, waits 15s for ingestion + correlation, and asserts: backend has ≥2 `process.created` and ≥1 `process.exited` direct events, `py.process.suspicious_child` fired, an `endpoint_compromise` incident opened, Wazuh path stays dormant, audit-checkpoint advanced.
+  - Synthetic injection (rather than relying on real lab activity) is necessary because Docker Desktop on Windows does not expose the kernel audit netlink socket to containers — the agent code path is identical regardless of where the audit lines come from. Documented in the script header.
+  - **Verification:** `bash labs/smoke_test_phase16_9.sh` → **15/15 PASS** ✅. Regression check: `bash labs/smoke_test_agent.sh` → 14/14 PASS ✅.
+
+- **16.9.7 — Documentation + memory note ✅ 2026-04-28**
+  - `docs/architecture.md` — "Telemetry sources" section rewritten to describe the dual-tail topology (sshd + auditd → shared shipper).
+  - `docs/runbook.md` — config table extended with the three `CCT_AUDIT_*` vars; new "Auditd source operations" subsection covers verification, kill switch, checkpoint inspection, and parse-warning shapes.
+  - `Project Brief.md` — telemetry paragraph updated to note both demos run on the agent without Wazuh.
+  - `PROJECT_STATE.md` — this file.
+  - Memory note saved.
+
+**Files created (16.9.1–16.9.2):**
+- `docs/decisions/ADR-0012-auditd-process-telemetry.md`
+- `infra/lab-debian/audit.rules`
+- `agent/cct_agent/parsers/auditd.py`
+- `agent/tests/test_auditd_parser.py`
+- `agent/tests/fixtures/audit_execve.log`
+- `agent/tests/fixtures/audit_exit.log`
+
+**Critical invariant honored:** Zero backend code changes. Zero frontend changes. 173/173 backend tests unchanged. No `--privileged` required (AUDIT_WRITE + AUDIT_CONTROL caps already granted in compose).
+
+---
+
+### Phase 16 — ✅ FULLY VERIFIED 2026-04-28 — Custom Telemetry Agent (replaces Wazuh as default)
+
+**What Phase 16 does:** Adds a Python 3.12 sidecar agent (`cct-agent` container) that tails `/var/log/auth.log` inside lab-debian via a shared read-only volume, parses sshd events into the canonical normalized event shape, and POSTs them to `/v1/events/raw` with an analyst-role Bearer token. Default `./start.sh` now brings up 6 containers (postgres/redis/backend/frontend/lab-debian/cct-agent), with no Wazuh stack. Wazuh remains fully supported behind `--profile wazuh`. Wazuh integration code is preserved, dormant, and re-enableable.
+
+**Motivation:** Demonstrates the pluggable-telemetry architecture from CLAUDE.md §6 in a portfolio-visible way. Frees roughly ~1.8 GB of memory in default mode (Wazuh manager + indexer + lab-debian's wazuh-agent). Strong interview story: "the platform is telemetry-source-agnostic; here's the same identity-compromise scenario sourced from Wazuh and from my custom agent, ending in identical incidents."
+
+**ADR:** `docs/decisions/ADR-0011-direct-agent-telemetry.md`. (Note: the original plan called this ADR-0004, but ADR-0004 was already taken by the Wazuh bridge ADR. ADR-0011 is the next available slot.)
+
+**Sub-phases (all verified):**
+- 16.1 — ADR-0011 + `agent/` skeleton (pyproject, Dockerfile, README, empty package tree). `pip install -e ./agent` succeeds.
+- 16.2 — sshd parser + event builders (`agent/cct_agent/parsers/sshd.py`, `agent/cct_agent/events.py`). Handles BSD + ISO 8601 syslog timestamps. Tests cover 4 line patterns + Debian/Ubuntu fixtures.
+- 16.3 — Async file tail + durable byte-offset checkpoint (`agent/cct_agent/sources/tail.py`, `agent/cct_agent/checkpoint.py`). Handles rotation (inode change) and truncation (size < offset). Atomic checkpoint write via tempfile + os.replace.
+- 16.4 — HTTP shipper + orchestration (`agent/cct_agent/shipper.py`, `config.py`, `__main__.py`). httpx async, bounded queue (drop-oldest with metric), exp backoff on 5xx + network, never retry 4xx. Pydantic-settings config from CCT_* env vars. Cross-platform signal handling.
+- 16.5 — Compose integration + first-run token bootstrap. `cct-agent` service in compose with `[agent]` profile; lab-debian moved to `[agent, wazuh]` profiles; shared `lab_logs` named volume. `start.sh` parses `--profile <name>` (repeatable), provisions `cct-agent@local` user + analyst token via `python -m app.cli` on first run, writes to `infra/compose/.env`, recreates the agent container.
+- 16.6 — Made agent the default; Wazuh demoted to opt-in. `start.sh` defaults to `--profile agent` when no flag given. Banner: "Telemetry: cct-agent (custom). Wazuh is opt-in — pass --profile wazuh to enable it."
+- 16.7 — End-to-end smoke test (`labs/smoke_test_agent.sh`). 14 checks covering containers, agent readiness, DB truncate, event firing inside lab-debian, event ingestion (source=direct), detection (py.auth.failed_burst), incident creation (identity_compromise), checkpoint persistence, and dedup-on-restart invariant.
+- 16.8 — Documentation: `docs/architecture.md` "Telemetry sources" section; `docs/runbook.md` agent operations + token rotation + troubleshooting; `Project Brief.md` positioning update; `PROJECT_STATE.md` (this file); memory file `project_phase16.md`.
+
+**Critical invariant honored:** Phase 16 made **zero backend code changes**. All risk landed in the new `agent/` tree, the compose file, `start.sh`, and the new ADR. Existing 173 backend tests pass unchanged.
+
+**Files created:**
+- `docs/decisions/ADR-0011-direct-agent-telemetry.md`
+- `agent/pyproject.toml`, `agent/Dockerfile`, `agent/README.md`
+- `agent/cct_agent/__init__.py`, `__main__.py`, `config.py`, `checkpoint.py`, `shipper.py`, `events.py`
+- `agent/cct_agent/parsers/__init__.py`, `parsers/sshd.py`
+- `agent/cct_agent/sources/__init__.py`, `sources/tail.py`
+- `agent/tests/__init__.py`, `tests/test_sshd_parser.py`, `tests/test_tail.py`, `tests/test_checkpoint.py`, `tests/test_shipper.py`
+- `agent/tests/fixtures/auth_debian.log`, `tests/fixtures/auth_ubuntu.log`
+- `labs/smoke_test_agent.sh`
+
+**Files modified (minimal touches):**
+- `infra/compose/docker-compose.yml` — added `cct-agent` service + `lab_logs`/`cct_agent_state` volumes; lab-debian moved to `[agent, wazuh]` profiles; removed wazuh-manager dependency from lab-debian (so it works in agent-only mode).
+- `infra/compose/.env.example` — added `CCT_AGENT_TOKEN=` placeholder + comments + tuning vars (`CCT_BATCH_SIZE`, `CCT_FLUSH_INTERVAL_SECONDS`).
+- `start.sh` — `--profile <name>` arg parsing (repeatable); default = `--profile agent`; first-run token bootstrap via `app.cli create-user`/`issue-token`; banner.
+- `.gitignore` — added `.pytest-basetemp/` for sandboxed pytest runs.
+- `docs/architecture.md` — replaced section 3.1 "Ingest adapters" with new "Telemetry sources (pluggable)"; updated section 9 "Deployment shape"; updated one-paragraph summary and current-state line.
+- `docs/runbook.md` — replaced/expanded "Start the core stack" with profile-aware instructions; added new "Telemetry sources (Phase 16)" section covering the agent's config, first-run bootstrap, token rotation, and troubleshooting.
+- `Project Brief.md` — updated the Wazuh positioning paragraph to reflect pluggable telemetry with the custom agent as default.
+
+**Verification (2026-04-28):**
+- `pytest` (backend, in container) → **173/173** ✅ (no backend regressions)
+- `pytest` (agent, on host) → **44/44** ✅ (parser 22, checkpoint 7, tail 7, shipper 8)
+- `bash labs/smoke_test_agent.sh` → **14/14** ✅
+  - Backend healthy, cct-agent + lab-debian running, no Wazuh containers in default profile
+  - Agent log shows `agent ready, tailing /lab/var/log/auth.log`
+  - 5 ssh failures + 1 success → 5 direct auth.failed events landed in backend
+  - `py.auth.failed_burst` detection fired
+  - `identity_compromise` incident opened (high severity, status=new)
+  - Checkpoint persisted at non-zero offset
+  - Restart-no-duplicates invariant held (count stayed at 5 after `docker compose restart cct-agent`)
+- `bash labs/smoke_test_phase15.sh` → **21/21** ✅ (regression check — recommendations engine still green)
+- Live curl: `GET /v1/wazuh/status` returns clean JSON without erroring (bridge code dormant).
+
+**Memory measurements (2026-04-28, agent-only profile, idle-ish stack):**
+- Container resident total: **902 MB** (frontend 622, backend 142, postgres 59, lab-debian 47, cct-agent 25, redis 8)
+- vmmemWSL on host: **2,813 MB** (down from ~4,000 MB with full Wazuh stack — **~1.2 GB / ~30% reduction**)
+- Host system memory utilization: **73.6%** (down from ~80%)
+- The cct-agent itself: **25 MB** at idle, vs the ~1.8 GB Wazuh stack it replaces (≈ 70× cheaper for the same auth-event detection chain)
+
+**Status:** Shipped and fully verified.
+
+---
+
+### Phase 15.4 — ✅ Smoke test + project state update — implemented and verified 2026-04-28
+
+**What Phase 15.4 does:** End-to-end smoke script that fires the `credential_theft_chain` scenario inline (curl-only, no host-side python deps), then exercises the recommender against both produced incidents (`identity_compromise` and `identity_endpoint_chain`), then proves the propose → execute → filter → revert → reappear lifecycle for the top recommendation.
+
+**New files:**
+- `labs/smoke_test_phase15.sh` — 21 checks. Inline curl-driven event firing (replaces the simulator dependency); registers lab assets; verifies endpoint response shape, sorting, and excluded-kind invariants on the chain incident; verifies `block_observable` on `203.0.113.42` is the top rec on the parent identity_compromise; runs the propose+execute flow; asserts the exec'd rec is filtered out; reverts; asserts the rec reappears; verifies 404 for unknown ids. Honours `AUTH_REQUIRED=true` via `SMOKE_API_TOKEN` from `labs/.smoke-env` (mirrors `smoke_test_phase11.sh` pattern).
+
+**Modified files:**
+- `PROJECT_STATE.md` — Phase 15 marked fully verified; sub-phase entries added for 15.2/15.3/15.4.
+
+**Verification (2026-04-28):**
+- `bash labs/smoke_test_phase15.sh` → **21/21** ✅ (with `AUTH_REQUIRED=false`)
+- `pytest` full suite (in backend container) → **173/173** ✅ (no regressions)
+- `npm run typecheck` → 0 errors ✅
+- Frontend image rebuilt; backend image rebuilt; running stack live-tested via curl.
+
+**Honest deviation from plan:** the original plan asserted "block_observable on 203.0.113.42 ranked first" on the *chain* incident. In practice the chain correlator carries user+host into the chain incident but not source_ip — so block_observable lives only on the parent `identity_compromise`. The smoke test was adjusted to verify both incidents accordingly: chain gets a non-empty, well-formed rec set with quarantine/invalidate/flag/request_evidence; identity_compromise carries the block_observable rec used for the propose/execute/revert lifecycle assertions. Carrying source_ip into the chain incident is a chain-correlator concern, out of scope for Phase 15.
+
+---
+
+### Phase 15.3 — ✅ RecommendedActionsPanel + page integration — implemented and verified 2026-04-28
+
+**What Phase 15.3 does:** Surfaces the recommendations as a new right-column panel above `ActionsPanel` on the incident detail page. Each rec renders with classification badge, humanized action label ("Block 203.0.113.42"), priority pill, rationale text, an EntityChip for the target (when applicable), and a "Use this" button that opens the existing `ProposeActionModal` pre-populated with the correct kind + form fields. Modal ownership is lifted from `ActionsPanel` to `page.tsx` so both panels drive the same modal instance. The panel refetches when `incident.actions` change (driven by SSE-triggered incident refetch via a stringified action-id+status `refreshKey`), so executing or reverting an action updates recommendations live without a second SSE connection.
+
+**New files:**
+- `frontend/app/incidents/[id]/RecommendedActionsPanel.tsx` — Fetches `getRecommendedActions(incidentId)`, refetches on `refreshKey` change. Renders loading/error/empty/populated states. Reuses `Panel`, `EntityChip`, `ActionClassificationBadge`, `useCanMutate` (read-only role disables the button with the standard tooltip).
+
+**Modified files:**
+- `frontend/app/incidents/[id]/ActionsPanel.tsx` — Drops local `proposeOpen` state and `<ProposeActionModal>` render; accepts new `onPropose: () => void` prop and delegates the "Propose action" button to it.
+- `frontend/app/incidents/[id]/page.tsx` — Adds page-level `proposeOpen`/`prefill` state and `openPropose` helper; renders single `<ProposeActionModal>` at page level driven by both panels; renders `<RecommendedActionsPanel>` directly above `<ActionsPanel>` with `refreshKey` derived from `incident.actions.map(a => a.id+":"+a.status).sort().join("|")`.
+
+**Verification (2026-04-28):**
+- `npm run typecheck` → 0 errors ✅
+- Frontend image rebuilt; container restarted; HTTP 307 (login redirect) confirms it's serving.
+- End-to-end behaviour exercised by `labs/smoke_test_phase15.sh` (recommendations API + filter/revert lifecycle).
+
+---
+
+### Phase 15.2 — ✅ Frontend plumbing (modal prefill + API client) — implemented and verified 2026-04-28
+
+**What Phase 15.2 does:** Adds the typed `RecommendedAction` interface and `getRecommendedActions(incidentId)` fetcher to the frontend API client; extends `ProposeActionModal` with an optional `prefill?: { kind, form }` prop that pre-populates the action kind and form fields on open. No visible UI change yet — invisible plumbing for 15.3.
+
+**Modified files:**
+- `frontend/app/lib/api.ts` — Added `RecommendedAction` interface (mirrors `RecommendedActionOut` from backend) and `getRecommendedActions` request wrapper.
+- `frontend/app/incidents/[id]/ProposeActionModal.tsx` — Added `prefill` prop; rewrote the open-effect so each open either applies `prefill` (sets kind+form) or resets to clean state. Uses a `prefillAppliedRef` flag to skip the next [kind] effect's form-clear when the kind change came from prefill (so prefilled form values aren't immediately wiped). No leakage between open/close cycles — every reopen starts fresh.
+
+**Verification (2026-04-28):**
+- `npm run typecheck` → 0 errors ✅
+- No-prefill behavior preserved (verified via 15.3 page integration where `ActionsPanel` opens the modal with no prefill).
+
+---
 
 ### Phase 15.1 — ✅ Backend Recommender + Endpoint — implemented and test-verified 2026-04-28
 
@@ -713,6 +974,15 @@ _None currently. Sub-track 1 blockers (cert infrastructure + Filebeat pipeline) 
 - **Local Python venv for IDE type-checking:** optional; Docker is sufficient for running.
 - **lab-debian auth.log forwarding**: Fixed — `rsyslog` added to Dockerfile, `rsyslogd` started in entrypoint, `<localfile>` block for `/var/log/auth.log` injected idempotently. SSH auth events now flow end-to-end.
 - **Startup / dev-ergonomics simplification (deferred to end of project):** collapse the current multi-terminal flow (compose up / backend commands / smoke scripts) into a single dispatcher — either sub-commands on `start.sh` (`./start.sh up|test|smoke|demo|down`) or a `Makefile`. Pure ergonomics, zero architectural impact. Defer until feature work is done so the final dispatcher wraps the final set of commands, not a moving target.
+- **Phase 16.10 follow-ons (deferred from ADR-0013):**
+  - **`py.network.suspicious_connection` detector** — outbound to non-RFC1918 on uncommon ports, rare-dst-IP heuristic. The `network.connection` events now flow end-to-end but no detector consumes them beyond `py.blocked_observable_match`. A dedicated detector would close the "anomalous outbound" story without needing a blocklist seed.
+  - **Process ↔ connection correlation** — which PID opened a given socket. Today the agent ships `process.created` and `network.connection` independently; they cannot be joined without eBPF or `/proc/net/tcp` polling + PID inspection. Out of scope for v1 because both eBPF and `/proc` polling cross the agent's "telemetry-only, read-only" boundary.
+  - **DNS-layer telemetry (`dns.query` events)** — different log source (e.g. `dnsmasq`/`unbound` query log, or eBPF). Would close the "DNS-to-bad-domain" story alongside conntrack's IP-level coverage. Add a fourth tail source when justified.
+  - **Network-flavored correlator** — joins multiple `network.connection` signals (e.g. fan-out to many destinations, recurring beaconing intervals) into incidents. Separate from a per-event detector; needs design work on the temporal-window primitives.
+  - **Dst-port allow/denylist at the agent** — `[NEW]`-only filter currently cuts ~80% of conntrack noise; if real demos still flood, add allow/denylist filtering at the parser. Kept off-by-default in v1 to avoid pre-filtering events a future detector might want.
+  - **Network entity for `dst_ip`** — `entity_extractor.py` currently extracts only `host` + `src_ip` from `network.connection`. `dst_ip` drives detection (via `py.blocked_observable_match`) but isn't a first-class entity, so the destination doesn't show up on the entity graph. Trivial fix when the analyst UI demands it; intentional v1 conservatism per ADR-0013.
+  - **Persistent tracked-PID state across agent restarts (carried over from Phase 16.9)** — process exit attribution is lost when the agent restarts mid-demo. Would require checkpointing the PID table to disk.
+  - **IPv6 conntrack output validation beyond loopback/link-local drop** — parser handles IPv6 (test fixtures cover the drop cases) but no real-traffic IPv6 fixture exists.
 
 ---
 

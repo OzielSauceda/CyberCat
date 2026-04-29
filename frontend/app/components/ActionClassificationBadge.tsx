@@ -27,7 +27,7 @@ export function ActionClassificationBadge({
   const { label, classes } = config[classification]
   return (
     <span
-      className={`inline-flex items-center rounded border px-1.5 py-0.5 text-xs font-medium ${classes}`}
+      className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-case font-medium uppercase tracking-widest ${classes}`}
     >
       {label}
     </span>

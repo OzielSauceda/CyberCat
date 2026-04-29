@@ -71,7 +71,8 @@ CyberCat/
 │   ├── smoke_test_phase6.sh      # 15-check full identity→endpoint chain test
 │   ├── smoke_test_phase7.sh      # 21-check Sigma + standalone endpoint test
 │   ├── smoke_test_phase8.sh      # 27-check Wazuh bridge + decoder test
-│   └── smoke_test_phase9a.sh     # 14-check response handlers + blocked detection test
+│   ├── smoke_test_phase9a.sh     # 14-check response handlers + blocked detection test
+│   └── smoke_test_agent.sh       # 14-check agent identity-compromise demo (default profile)
 ├── infra/
 │   └── compose/
 │       └── docker-compose.yml
@@ -80,17 +81,13 @@ CyberCat/
 
 ## Start the core stack
 
-Run all compose commands from the `infra/compose/` directory.
+The default deployment runs the **custom telemetry agent** (`cct-agent`) as the source of sshd events. Wazuh is opt-in. See `docs/decisions/ADR-0011-direct-agent-telemetry.md` for the why.
 
 ```bash
-cd infra/compose
-
-# First time or after code changes: build images
-docker compose build
-docker compose up -d
-
-# Subsequent runs (images already built):
-docker compose up -d
+# Project root — easiest path:
+./start.sh                      # default: --profile agent (6 containers)
+./start.sh --profile wazuh      # opt into Wazuh stack instead
+./start.sh --profile agent --profile wazuh   # both — for "compare the sources" demos
 ```
 
 Endpoints:
@@ -99,13 +96,122 @@ Endpoints:
 
 Stop everything:
 ```bash
-docker compose down
+./stop.sh
 ```
+
+**Convenience scripts at project root:**
+- `./start.sh [--profile <name>]` — auto-launches Docker Desktop if not running, brings the stack up, and on first run with `--profile agent` provisions the `cct-agent@local` user + an analyst-role API token (written into `infra/compose/.env` as `CCT_AGENT_TOKEN`). Repeatable: `--profile agent --profile wazuh` runs both.
+- `./stop.sh` — wraps `docker compose down`. Use mid-session to free container memory without exiting your editor / Claude Code session. Containers come back fast on the next `./start.sh` because images stay cached.
 
 **Important:** The frontend is a build image (no live volume mount). If you add new pages or modify frontend code, rebuild with:
 ```bash
 docker compose build frontend && docker compose up -d frontend
 ```
+
+The same applies to the agent — code in `agent/` is baked into the `compose-cct-agent` image at build time:
+```bash
+docker compose --profile agent build cct-agent && \
+  docker compose --profile agent up -d --force-recreate cct-agent
+```
+
+## Telemetry sources (Phase 16)
+
+CyberCat ships with a custom Python sidecar agent and supports Wazuh as an optional alternative. Both produce events for the same downstream pipeline (normalizer → detection → correlation → incidents).
+
+### Two operational modes — pick one at startup, never mid-session
+
+The agent and Wazuh paths are not picked per-incident; you choose at startup which one(s) to run. The action handlers gracefully degrade based on what's available, so the platform never errors when Wazuh is absent — it just does less in the real world.
+
+| Mode | How to start | What works | What changes for response actions |
+|---|---|---|---|
+| **Observe-and-record (default)** | `./start.sh` | Full ingest + detection + correlation + incidents + UI + audit. Every analyst workflow is real. | "Quarantine host" / "Kill process" write the DB marker + audit log + SSE notification + UI update — but **no real `iptables -I INPUT DROP`** lands on the lab box. |
+| **Observe-record-and-enforce** | `./start.sh --profile wazuh` + set `WAZUH_AR_ENABLED=true` in `.env` | Same as above, plus real OS-level enforcement. | Same UI button now also dispatches Wazuh Active Response → real iptables rule / real `kill -9` on the lab box. |
+
+**When to pick which:**
+- Day-to-day coding, demo recording, interview walk-through, the credential_theft_chain scenario → **default mode**. The detection logic and analyst experience are 100% real; only the OS-level enforcement is skipped.
+- Specifically when you want to demonstrate "the platform actually changes the state of a real Linux box" → **Wazuh mode with AR enabled**. Use `iptables -L` inside lab-debian to show before/after.
+
+**Why this is by design (not a limitation):** a system that silently switched between "real iptables" and "DB-only" mid-session would be unsafe — you'd never be sure if a click did anything. Startup-time configuration makes the behavior of every action button predictable from how the stack was started. Both modes are production-shape; one stops at the system-of-record, the other closes the loop to the host.
+
+### Custom agent (`cct-agent`) — default
+
+### Custom agent (`cct-agent`) — default ingest path
+
+The agent lives in `agent/` and runs as a separate container under `--profile agent`. It tails `/var/log/auth.log` inside lab-debian via a shared read-only volume, parses sshd lines, and POSTs canonical events to `POST /v1/events/raw`. **The agent is telemetry-only** — it does not receive commands from the backend and cannot enforce OS-level response actions. That capability remains Wazuh-only via Active Response (see "Two operational modes" above).
+
+**Event scope (Phase 16 + 16.9):** sshd source emits `auth.failed`, `auth.succeeded`, `session.started`, `session.ended`. **Auditd source (Phase 16.9)** emits `process.created` (every EXECVE) and `process.exited` (only for PIDs we previously saw start, via the bounded LRU in `agent/cct_agent/process_state.py`). Both sources run as independent asyncio tasks feeding a single shipper queue. Network events via conntrack are Phase 16.10.
+
+**Configuration (env, all optional except CCT_AGENT_TOKEN):**
+
+| Var | Default | Purpose |
+|---|---|---|
+| `CCT_API_URL` | `http://backend:8000` | Backend base URL |
+| `CCT_AGENT_TOKEN` | *(provisioned by start.sh)* | Bearer token (analyst role) |
+| `CCT_LOG_PATH` | `/lab/var/log/auth.log` | sshd log file (mounted from lab-debian) |
+| `CCT_CHECKPOINT_PATH` | `/var/lib/cct-agent/checkpoint.json` | sshd byte-offset state |
+| `CCT_AUDIT_LOG_PATH` | `/lab/var/log/audit/audit.log` | auditd log file (mounted from lab-debian) |
+| `CCT_AUDIT_CHECKPOINT_PATH` | `/var/lib/cct-agent/audit-checkpoint.json` | auditd byte-offset state |
+| `CCT_AUDIT_ENABLED` | `true` | Kill switch for the auditd source |
+| `CCT_CONNTRACK_LOG_PATH` | `/lab/var/log/conntrack.log` | conntrack log file (mounted from lab-debian) |
+| `CCT_CONNTRACK_CHECKPOINT_PATH` | `/var/lib/cct-agent/conntrack-checkpoint.json` | conntrack byte-offset state |
+| `CCT_CONNTRACK_ENABLED` | `true` | Kill switch for the conntrack source |
+| `CCT_HOST_NAME` | `lab-debian` | Logical host name for the events |
+| `CCT_BATCH_SIZE` | `50` | Max events per HTTP flush |
+| `CCT_FLUSH_INTERVAL_SECONDS` | `2.0` | Max seconds between HTTP flushes |
+
+**First-run token bootstrap.** When `./start.sh --profile agent` runs and `CCT_AGENT_TOKEN` is empty in `infra/compose/.env`, the script:
+1. Waits for the backend `/healthz` to return 200.
+2. Runs `python -m app.cli create-user --email cct-agent@local --password <random> --role analyst` inside the backend container (idempotent — ignores "already exists").
+3. Runs `python -m app.cli issue-token --email cct-agent@local --name cct-agent`, parses the printed token, and writes it into `.env`.
+4. Recreates the `cct-agent` container so it picks up the new token.
+
+This makes the first run zero-touch.
+
+**Token rotation.** No automatic rotation in v1 (deferred to Phase 18). To rotate manually:
+
+```bash
+# 1. Issue a new token (the old one stays valid until you revoke it).
+docker compose exec backend python -m app.cli issue-token \
+  --email cct-agent@local --name cct-agent-rotated
+
+# 2. Copy the printed token, replace the value in infra/compose/.env, restart the agent:
+docker compose --profile agent up -d --force-recreate cct-agent
+
+# 3. Optional: revoke the old token by ID (printed when you issued it).
+docker compose exec backend python -m app.cli revoke-token --token-id <old-uuid>
+```
+
+**Troubleshooting the agent:**
+- `docker logs compose-cct-agent-1 --tail 50` — should show `agent ready, tailing /lab/var/log/auth.log + /lab/var/log/audit/audit.log + /lab/var/log/conntrack.log` shortly after startup (subset of paths when individual sources are disabled or unavailable), then per-source `... source started, tailing ...` lines, then `HTTP/1.1 201 Created` lines as events ship.
+- HTTP 401 on every POST → `CCT_AGENT_TOKEN` is empty, expired, or revoked. Re-issue (above) and recreate the container.
+- HTTP 422 in logs → backend rejected the payload as malformed. Inspect the agent log; the 4xx is logged with the offending event kind. Never retried.
+- No events flowing despite valid log lines → check that lab-debian is up (`docker ps`) and that the shared volume contains data: `docker exec compose-cct-agent-1 ls -lh /lab/var/log/auth.log /lab/var/log/audit/audit.log /lab/var/log/conntrack.log`.
+- Checkpoint inspection: `docker exec compose-cct-agent-1 cat /var/lib/cct-agent/checkpoint.json /var/lib/cct-agent/audit-checkpoint.json /var/lib/cct-agent/conntrack-checkpoint.json` — all three should show non-zero offsets advancing as events arrive on each source.
+- "Replay everything" debug: `docker exec compose-cct-agent-1 rm /var/lib/cct-agent/checkpoint.json /var/lib/cct-agent/audit-checkpoint.json /var/lib/cct-agent/conntrack-checkpoint.json` then `docker compose --profile agent restart cct-agent`. The backend's dedup (`(source, dedupe_key)`) ensures replays don't duplicate events.
+
+**Auditd source operations (Phase 16.9):**
+- **Verify auditd is running inside lab-debian:** `docker exec compose-lab-debian-1 service auditd status` and `docker exec compose-lab-debian-1 auditctl -l` — the latter should list the `cybercat_exec` and `cybercat_exit` rules. If `auditctl` returns "Operation not permitted", the kernel audit netlink socket is unavailable to the container (common with Docker Desktop on Windows/macOS — the agent will log a warning and skip the audit source rather than crash). On Linux hosts, kernel audit usually Just Works with the `AUDIT_WRITE` + `AUDIT_CONTROL` capabilities the lab-debian service already requests.
+- **Disable the audit source** (e.g. when running outside lab-debian): set `CCT_AUDIT_ENABLED=false` in `infra/compose/.env` and `docker compose --profile agent up -d --force-recreate cct-agent`. The agent will run sshd-only.
+- **Inspect the audit checkpoint:** `docker exec compose-cct-agent-1 cat /var/lib/cct-agent/audit-checkpoint.json` — same `{inode, offset}` shape as the sshd checkpoint.
+- **Common parse warnings:** lines that don't match the `type=... msg=audit(ts:id):` header are silently skipped (kernel records of non-tracked types like `LOGIN`, `USER_AUTH`, etc.). Buffered events that never receive an `EOE` record are flushed at the 100-line cap or on agent shutdown via `parser.flush()`.
+
+**Conntrack source operations (Phase 16.10):**
+- **Verify conntrack is running inside lab-debian:** `docker exec compose-lab-debian-1 pgrep -af conntrack` should list `conntrack -E -e NEW -o timestamp -o extended -o id`. The entrypoint spawns it under lab-debian's existing `NET_ADMIN` capability. To check it's emitting: `docker exec compose-lab-debian-1 bash -c 'curl -m 2 -s http://example.com >/dev/null; sleep 1; tail -3 /var/log/conntrack.log'` should show `[NEW]` lines.
+- **Why `conntrack -E` may stay silent:** Docker Desktop on Windows / WSL2 does not expose the kernel's `nf_conntrack` netlink group to containers, so the subscription succeeds but no events arrive. The entrypoint wraps the spawn in `( ... ) || true` and the agent treats a missing `/var/log/conntrack.log` as "skip this source" rather than crashing. On Linux hosts the kernel netlink path Just Works.
+- **Disable the conntrack source** (e.g. when running outside lab-debian, or to reduce event volume during a load test): set `CCT_CONNTRACK_ENABLED=false` in `infra/compose/.env` and `docker compose --profile agent up -d --force-recreate cct-agent`. The agent will run sshd + auditd only.
+- **Inspect the conntrack checkpoint:** `docker exec compose-cct-agent-1 cat /var/lib/cct-agent/conntrack-checkpoint.json` — same `{inode, offset}` shape as the sshd and auditd checkpoints.
+- **Common parser drops:** loopback (`127.0.0.0/8`, `::1`) and link-local (`169.254/16`, `fe80::/10`) records are dropped on purpose. `[UPDATE]` and `[DESTROY]` records are also dropped — only `[NEW]` becomes a `network.connection` event in v1. Protocols other than TCP/UDP/ICMP (e.g. `igmp`, `gre`) are silently dropped too.
+
+**Smoke test:** `bash labs/smoke_test_agent.sh` — verifies the full path (5 SSH failures + 1 success → events → detection → identity_compromise incident → checkpoint persistence → restart-no-duplicates). Targets the agent stack; honours `SMOKE_API_TOKEN` from `labs/.smoke-env` if `AUTH_REQUIRED=true`.
+
+### Switching to Wazuh
+
+```bash
+./stop.sh
+./start.sh --profile wazuh
+```
+
+The detailed Wazuh bring-up (cert generation, security bootstrap, role mapping) is in the next section. Wazuh and the agent can both run concurrently if you want to compare the same scenario through both telemetry sources — note that no cross-source dedup exists in v1, so this will produce duplicate events.
 
 ## Add Wazuh (optional, heavier)
 
@@ -486,6 +592,8 @@ docker compose -f infra/compose/docker-compose.yml exec backend python -m pytest
 
 Unit tests cover: Sigma parser, compiler, field map (38 tests) + Wazuh decoder (11 tests: sshd auth, auditd process, Sysmon EventID 1 process) + response handlers real (13 tests). No live DB or Redis needed for Sigma/decoder tests; handlers tests require the compose stack. Run the full suite with `pytest` (no path) from the container.
 
+**Agent tests** (run from the host, not inside Docker): `cd agent && pytest` → **67 tests** (sshd parser 22, auditd parser 23, checkpoint 7, tail 7, shipper 8). No Docker required.
+
 ## Regenerate the OpenAPI snapshot
 
 The backend writes `openapi.json` inside the container. Copy it to the host so the frontend codegen can read it:
@@ -539,6 +647,12 @@ After running `smoke_test_phase9a.sh`:
 7. **Actions panel** — shows executed auto-tag actions (proposed_by=system) plus an auto-proposed `request_evidence` (suggest_only, proposed_by=system).
 8. **Evidence Requests panel** — below Actions panel. Shows the auto-proposed `triage_log` evidence request (status=open). Click **Mark collected** → status turns green.
 
+**Recommended response panel (Phase 15):**
+8a. Above the **Response actions** panel on the incident detail page, the **Recommended response** panel renders 1–4 ranked, pre-filled action suggestions. Each row shows a classification badge, a humanized action label (e.g. "Block 203.0.113.42"), priority pill, rationale text, and an EntityChip for the target.
+8b. Click **Use this** on the top recommendation → the **Propose action** modal opens with the kind already selected and the form fields pre-populated. Click **Propose** → action proposed → **Execute** in the Actions panel below → that recommendation drops out of the panel (already-executed filter).
+8c. **Revert** the executed action → the recommendation reappears live (driven by the SSE-triggered incident refetch).
+8d. As a `read_only` user the **Use this** buttons render disabled with the standard "Read-only role" tooltip.
+
 **Response — new action kinds:**
 9. Use **Propose action** → `quarantine_host_lab`. Set host to `lab-win10-01`. Execute → `LabAsset.notes` gets a quarantine marker; incident gets a note.
 10. Use **Propose action** → `kill_process_lab`. Set host + pid + process_name. Execute → a `process_list` evidence request auto-appears in the Evidence Requests panel.
@@ -578,7 +692,20 @@ bash labs/smoke_test_phase8.sh
 
 # Phase 9A — response handlers + blocked detection (14 checks)
 bash labs/smoke_test_phase9a.sh
+
+# Phase 15 — recommended response actions endpoint + lifecycle (21 checks)
+bash labs/smoke_test_phase15.sh
 ```
+
+### Phase 15 — recommended response actions
+
+`bash labs/smoke_test_phase15.sh` reproduces the `credential_theft_chain` scenario inline via curl (no host-side python deps), then exercises the recommender against both incidents the scenario produces:
+
+- **Chain incident (`identity_endpoint_chain`)** — verifies the endpoint returns 200 with at least 1 well-formed recommendation, all required fields populated, no excluded kinds (`tag_incident`/`elevate_severity`/`kill_process_lab`), sorted by priority ascending.
+- **Parent incident (`identity_compromise`)** — verifies the top recommendation is `block_observable` on `203.0.113.42` (T1110 Brute Force boost). Then proposes + executes that action via `/v1/responses`, refetches recommendations, asserts the rec is filtered out (already-executed filter), reverts the action, and asserts the rec reappears.
+- **Edge cases** — 404 for unknown incident id.
+
+Honours `AUTH_REQUIRED=true` via `SMOKE_API_TOKEN` in `labs/.smoke-env` (mirrors `smoke_test_phase11.sh`). Auto-truncates DB + flushes Redis at the start; safe to re-run.
 
 ## Run unit tests
 

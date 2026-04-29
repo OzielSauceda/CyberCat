@@ -132,6 +132,22 @@ export function AttackKillChainPanel({ attack }: { attack: AttackRef[] }) {
               ))}
             </div>
           )}
+
+          {/* Legend */}
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 pt-1 text-[10px] text-dossier-ink/40">
+            <span className="flex items-center gap-1.5">
+              <span className="inline-block h-3 w-4 rounded-sm bg-indigo-950/60 border border-indigo-800/40" />
+              Tactic observed
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="rounded bg-zinc-700 px-1 text-[8px] text-zinc-300 leading-tight">R</span>
+              Rule-derived technique
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="rounded bg-violet-900 px-1 text-[8px] text-violet-300 leading-tight">C</span>
+              Correlator inferred
+            </span>
+          </div>
         </div>
       )}
     </Panel>

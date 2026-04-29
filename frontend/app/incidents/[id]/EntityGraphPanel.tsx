@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Panel } from "../../components/Panel"
 import { EmptyState } from "../../components/EmptyState"
@@ -89,7 +89,15 @@ export function EntityGraphPanel({
 }) {
   const router = useRouter()
   const [hovered, setHovered] = useState<string | null>(null)
+  const [mounted, setMounted] = useState(false)
+  // stable prefix so path IDs don't collide if multiple graphs are on page
+  const graphId = useMemo(() => `eg-${Math.random().toString(36).slice(2, 7)}`, [])
   const { nodes, edges } = useMemo(() => computeLayout(entities, events), [entities, events])
+
+  useEffect(() => {
+    const id = setTimeout(() => setMounted(true), 80)
+    return () => clearTimeout(id)
+  }, [])
 
   if (entities.length === 0) {
     return (
@@ -111,15 +119,25 @@ export function EntityGraphPanel({
         aria-label="Entity relationship graph"
       >
         {/* Edges */}
-        {edges.map((edge) => {
+        {edges.map((edge, edgeIdx) => {
           const src = nodeMap.get(edge.source)
           const tgt = nodeMap.get(edge.target)
           if (!src || !tgt) return null
           const highlighted = hovered === edge.source || hovered === edge.target
           const dimmed = hovered !== null && !highlighted
+          const pathId = `${graphId}-e${edgeIdx}`
 
           return (
-            <g key={`edge-${edge.source}-${edge.target}`} opacity={dimmed ? 0.12 : 1}>
+            <g
+              key={`edge-${edge.source}-${edge.target}`}
+              style={{
+                opacity: mounted ? (dimmed ? 0.1 : 1) : 0,
+                transition: `opacity 0.3s ease ${edgeIdx * 55 + 150}ms`,
+              }}
+            >
+              {/* Invisible path for animateMotion reference */}
+              <path id={pathId} d={`M ${src.x} ${src.y} L ${tgt.x} ${tgt.y}`} fill="none" stroke="none" />
+
               <line
                 x1={src.x} y1={src.y}
                 x2={tgt.x} y2={tgt.y}
@@ -127,6 +145,7 @@ export function EntityGraphPanel({
                 strokeWidth={highlighted ? Math.min(edge.weight + 1, 5) : 1.5}
                 strokeDasharray={highlighted ? undefined : "5 4"}
               />
+
               {highlighted && (
                 <text
                   x={(src.x + tgt.x) / 2}
@@ -139,12 +158,21 @@ export function EntityGraphPanel({
                   {edge.weight}×
                 </text>
               )}
+
+              {/* Glowing dot flows along the edge when highlighted */}
+              {highlighted && (
+                <circle r={3} fill="#818cf8" opacity={0.9}>
+                  <animateMotion dur="1.4s" repeatCount="indefinite">
+                    <mpath href={`#${pathId}`} />
+                  </animateMotion>
+                </circle>
+              )}
             </g>
           )
         })}
 
-        {/* Nodes */}
-        {nodes.map((node) => {
+        {/* Nodes — spring scale-in with stagger */}
+        {nodes.map((node, idx) => {
           const colors = NODE_COLORS[node.entity.kind as EntityKind] ?? NODE_COLORS.observable
           const r = Math.min(Math.max(14, 10 + node.eventCount * 1.5), 22)
           const isHov = hovered === node.entity.id
@@ -153,63 +181,86 @@ export function EntityGraphPanel({
             node.entity.natural_key.length > 18
               ? node.entity.natural_key.slice(0, 16) + "…"
               : node.entity.natural_key
+          const entryDelay = idx * 65 + 280
 
           return (
-            <g
-              key={node.entity.id}
-              transform={`translate(${node.x},${node.y})`}
-              onMouseEnter={() => setHovered(node.entity.id)}
-              onMouseLeave={() => setHovered(null)}
-              onClick={() => router.push(`/entities/${node.entity.id}`)}
-              style={{ cursor: "pointer" }}
-              opacity={dimmed ? 0.22 : 1}
-            >
-              {isHov && (
-                <circle r={r + 7} fill={colors.stroke} opacity={0.12} />
-              )}
-              <circle
-                r={r}
-                fill={colors.fill}
-                stroke={colors.stroke}
-                strokeWidth={isHov ? 2.5 : 1.5}
-              />
-              <text
-                textAnchor="middle"
-                dominantBaseline="central"
-                fontSize={9}
-                fill={colors.stroke}
-                fontFamily="ui-monospace, monospace"
-                fontWeight="bold"
-                style={{ pointerEvents: "none", userSelect: "none" }}
+            // Outer g handles SVG positioning (stable)
+            <g key={node.entity.id} transform={`translate(${node.x},${node.y})`}>
+              {/* Inner g handles CSS animation + hover */}
+              <g
+                onMouseEnter={() => setHovered(node.entity.id)}
+                onMouseLeave={() => setHovered(null)}
+                onClick={() => router.push(`/entities/${node.entity.id}`)}
+                style={{
+                  cursor: "pointer",
+                  opacity: mounted ? (dimmed ? 0.2 : 1) : 0,
+                  transform: mounted ? "scale(1)" : "scale(0.25)",
+                  transformBox: "fill-box",
+                  transformOrigin: "center",
+                  transition: `opacity 0.3s ease ${entryDelay}ms, transform 0.45s cubic-bezier(0.34,1.56,0.64,1) ${entryDelay}ms`,
+                }}
               >
-                {node.entity.kind.slice(0, 3).toUpperCase()}
-              </text>
-              <text
-                y={r + 12}
-                textAnchor="middle"
-                fontSize={10}
-                fill={isHov ? colors.text : "#a1a1aa"}
-                fontFamily="ui-monospace, monospace"
-                style={{ pointerEvents: "none", userSelect: "none" }}
-              >
-                {label}
-              </text>
-              {node.entity.role_in_incident && (
+                {/* Hover glow ring */}
+                {isHov && (
+                  <circle r={r + 7} fill={colors.stroke} opacity={0.12} />
+                )}
+                <circle
+                  r={r}
+                  fill={colors.fill}
+                  stroke={colors.stroke}
+                  strokeWidth={isHov ? 2.5 : 1.5}
+                />
                 <text
-                  y={r + 24}
                   textAnchor="middle"
-                  fontSize={8}
-                  fill={isHov ? "#71717a" : "#3f3f46"}
+                  dominantBaseline="central"
+                  fontSize={9}
+                  fill={colors.stroke}
+                  fontFamily="ui-monospace, monospace"
+                  fontWeight="bold"
+                  style={{ pointerEvents: "none", userSelect: "none" }}
+                >
+                  {node.entity.kind.slice(0, 3).toUpperCase()}
+                </text>
+                <text
+                  y={r + 12}
+                  textAnchor="middle"
+                  fontSize={10}
+                  fill={isHov ? colors.text : "#a1a1aa"}
                   fontFamily="ui-monospace, monospace"
                   style={{ pointerEvents: "none", userSelect: "none" }}
                 >
-                  {node.entity.role_in_incident}
+                  {label}
                 </text>
-              )}
+                {node.entity.role_in_incident && (
+                  <text
+                    y={r + 24}
+                    textAnchor="middle"
+                    fontSize={8}
+                    fill={isHov ? "#71717a" : "#3f3f46"}
+                    fontFamily="ui-monospace, monospace"
+                    style={{ pointerEvents: "none", userSelect: "none" }}
+                  >
+                    {node.entity.role_in_incident}
+                  </text>
+                )}
+              </g>
             </g>
           )
         })}
       </svg>
+
+      {/* Entity kind legend */}
+      <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 border-t border-dossier-paperEdge pt-3 text-[10px] text-dossier-ink/50">
+        {(Object.entries(NODE_COLORS) as [EntityKind, { fill: string; stroke: string; text: string }][]).map(([kind, colors]) => (
+          <span key={kind} className="flex items-center gap-1.5">
+            <span
+              className="inline-block h-2.5 w-2.5 rounded-full border"
+              style={{ backgroundColor: colors.fill, borderColor: colors.stroke }}
+            />
+            <span className="capitalize">{kind}</span>
+          </span>
+        ))}
+      </div>
     </Panel>
   )
 }

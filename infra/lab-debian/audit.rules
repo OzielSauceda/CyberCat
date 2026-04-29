@@ -1,0 +1,2 @@
+-a always,exit -F arch=b64 -S execve -k cybercat_exec
+-a always,exit -F arch=b64 -S exit_group -k cybercat_exit

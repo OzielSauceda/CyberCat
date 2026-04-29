@@ -46,6 +46,10 @@ class Settings(BaseSettings):
     wazuh_ca_bundle_path: str = "/etc/ssl/certs/wazuh-ca.pem"
     wazuh_first_run_lookback_minutes: int = 5
 
+    # Demo auto-seed (Phase 17.6)
+    # Set false in production or any environment with real event ingest.
+    cct_autoseed_demo: bool = True
+
     # Wazuh Active Response dispatch (Phase 11)
     wazuh_ar_enabled: bool = False
     wazuh_manager_url: str = "https://wazuh-manager:55000"

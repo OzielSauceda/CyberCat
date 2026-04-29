@@ -11,12 +11,13 @@ interface ProposeActionModalProps {
   incidentId: string
   onClose: () => void
   onProposed: () => void
+  prefill?: { kind: ActionKind; form: Record<string, string> }
 }
 
 // Module-level cache so datalist hints survive re-opens without refetching
 const labAssetCache = new Map<LabAssetKind, LabAsset[]>()
 
-export function ProposeActionModal({ open, incidentId, onClose, onProposed }: ProposeActionModalProps) {
+export function ProposeActionModal({ open, incidentId, onClose, onProposed, prefill }: ProposeActionModalProps) {
   const { push } = useToast()
   const canMutate = useCanMutate()
   const dialogRef = useRef<HTMLDialogElement>(null)
@@ -27,25 +28,42 @@ export function ProposeActionModal({ open, incidentId, onClose, onProposed }: Pr
   const [pending, setPending] = useState(false)
   const [scopeError, setScopeError] = useState<string | null>(null)
   const [labAssets, setLabAssets] = useState<LabAsset[]>([])
+  const prefillAppliedRef = useRef(false)
 
   const formDef = ACTION_FORMS[kind]
 
-  // Open / close native dialog
+  // Open / close native dialog. On open: clear prior state, then apply prefill if given.
   useEffect(() => {
     const dialog = dialogRef.current
     if (!dialog) return
     if (open) {
       returnFocusRef.current = document.activeElement
       dialog.showModal()
+      setScopeError(null)
+      if (prefill) {
+        prefillAppliedRef.current = true
+        setKind(prefill.kind)
+        setForm(prefill.form)
+      } else {
+        prefillAppliedRef.current = false
+        setKind(ENABLED_KINDS[0])
+        setForm({})
+      }
     } else {
       dialog.close()
+      prefillAppliedRef.current = false
       const el = returnFocusRef.current
       if (el instanceof HTMLElement) el.focus()
     }
-  }, [open])
+  }, [open, prefill])
 
-  // Reset form when kind changes
+  // Reset form when user changes kind via dropdown — but skip the reset
+  // triggered by setKind during prefill application.
   useEffect(() => {
+    if (prefillAppliedRef.current) {
+      prefillAppliedRef.current = false
+      return
+    }
     setForm({})
     setScopeError(null)
   }, [kind])
