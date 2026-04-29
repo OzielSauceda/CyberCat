@@ -21,22 +21,22 @@ import { usePolling } from "../lib/usePolling"
 
 const ALL_KINDS: LabAssetKind[] = ["user", "host", "ip", "observable"]
 
-const kindStyles: Record<LabAssetKind, string> = {
-  user: "text-indigo-300 bg-indigo-950 border-indigo-800",
-  host: "text-violet-300 bg-violet-950 border-violet-800",
-  ip: "text-cyan-300 bg-cyan-950 border-cyan-800",
-  observable: "text-pink-300 bg-pink-950 border-pink-800",
+const KIND_STYLE: Record<LabAssetKind, { text: string; border: string; bg: string }> = {
+  user:       { text: "#818cf8", border: "#4f46e540", bg: "#1e1b4b25" },
+  host:       { text: "#a78bfa", border: "#7c3aed40", bg: "#2e106525" },
+  ip:         { text: "#00d4ff", border: "#00d4ff40", bg: "#00d4ff0f" },
+  observable: { text: "#f472b6", border: "#db277740", bg: "#83184320" },
 }
 
 function LabSkeleton() {
   return (
-    <div className="animate-pulse space-y-3">
-      {Array.from({ length: 4 }).map((_, i) => (
-        <SkeletonRow key={i} />
-      ))}
+    <div className="space-y-1.5">
+      {Array.from({ length: 4 }).map((_, i) => <SkeletonRow key={i} />)}
     </div>
   )
 }
+
+// ── Register form ─────────────────────────────────────────────────────────────
 
 interface AddAssetFormProps {
   onAdded: () => void
@@ -45,10 +45,10 @@ interface AddAssetFormProps {
 
 function AddAssetForm({ onAdded, canMutate }: AddAssetFormProps) {
   const { push } = useToast()
-  const [kind, setKind] = useState<LabAssetKind>("host")
+  const [kind,       setKind]       = useState<LabAssetKind>("host")
   const [naturalKey, setNaturalKey] = useState("")
-  const [notes, setNotes] = useState("")
-  const [pending, setPending] = useState(false)
+  const [notes,      setNotes]      = useState("")
+  const [pending,    setPending]    = useState(false)
 
   const canSubmit = naturalKey.trim().length > 0 && !pending
 
@@ -79,48 +79,51 @@ function AddAssetForm({ onAdded, canMutate }: AddAssetFormProps) {
     }
   }
 
+  const fieldClass =
+    "w-full border border-dossier-paperEdge bg-dossier-stamp px-3 py-2 font-mono text-sm text-dossier-ink/80 placeholder-dossier-ink/20 outline-none focus:border-dossier-evidenceTape/50 transition-colors disabled:opacity-50"
+
   return (
     <form onSubmit={(e) => void handleSubmit(e)} className="space-y-3">
       <div className="space-y-1">
-        <label className="text-xs text-zinc-400">Kind</label>
+        <label className="font-mono text-[11px] uppercase tracking-widest text-dossier-ink/35">Kind</label>
         <select
           value={kind}
           onChange={(e) => setKind(e.target.value as LabAssetKind)}
           disabled={pending}
-          className="w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-100 outline-none focus:border-indigo-600 disabled:opacity-50"
+          className={fieldClass}
         >
-          {ALL_KINDS.map((k) => (
-            <option key={k} value={k}>
-              {k}
-            </option>
-          ))}
+          {ALL_KINDS.map((k) => <option key={k} value={k}>{k}</option>)}
         </select>
       </div>
 
       <div className="space-y-1">
-        <label className="text-xs text-zinc-400">
-          Natural key <span className="text-red-400">*</span>
+        <label className="font-mono text-[11px] uppercase tracking-widest text-dossier-ink/35">
+          Natural key <span className="text-dossier-redaction">*</span>
         </label>
         <input
           type="text"
           value={naturalKey}
           onChange={(e) => setNaturalKey(e.target.value)}
           disabled={pending}
-          placeholder={kind === "user" ? "alice@corp.local" : kind === "host" ? "lab-win10-01" : kind === "ip" ? "203.0.113.7" : "observable-key"}
+          placeholder={
+            kind === "user" ? "alice@corp.local" :
+            kind === "host" ? "lab-win10-01" :
+            kind === "ip"   ? "203.0.113.7" : "observable-key"
+          }
           autoComplete="off"
-          className="w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm font-mono text-zinc-100 placeholder-zinc-600 outline-none focus:border-indigo-600 disabled:opacity-50"
+          className={fieldClass}
         />
       </div>
 
       <div className="space-y-1">
-        <label className="text-xs text-zinc-400">Notes (optional)</label>
+        <label className="font-mono text-[11px] uppercase tracking-widest text-dossier-ink/35">Notes (optional)</label>
         <textarea
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
           disabled={pending}
           rows={2}
           placeholder="Description or context…"
-          className="w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-100 placeholder-zinc-600 outline-none focus:border-indigo-600 disabled:opacity-50 resize-none"
+          className={`${fieldClass} resize-none`}
         />
       </div>
 
@@ -128,7 +131,7 @@ function AddAssetForm({ onAdded, canMutate }: AddAssetFormProps) {
         type="submit"
         disabled={!canSubmit || !canMutate}
         title={!canMutate ? "Read-only role" : undefined}
-        className="w-full rounded bg-indigo-700 py-1.5 text-sm font-medium text-white hover:bg-indigo-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+        className="w-full py-2 font-case text-xs font-semibold uppercase tracking-widest border border-dossier-evidenceTape/25 text-dossier-evidenceTape/65 hover:border-dossier-evidenceTape/55 hover:text-dossier-evidenceTape hover:bg-dossier-evidenceTape/5 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
       >
         {pending ? "Registering…" : "Register asset"}
       </button>
@@ -136,13 +139,15 @@ function AddAssetForm({ onAdded, canMutate }: AddAssetFormProps) {
   )
 }
 
+// ── Page ──────────────────────────────────────────────────────────────────────
+
 export default function LabPage() {
   const { push } = useToast()
   const canMutate = useCanMutate()
-  const [kindFilter, setKindFilter] = useState<LabAssetKind | "">("")
-  const [deleteTarget, setDeleteTarget] = useState<LabAsset | null>(null)
+  const [kindFilter,    setKindFilter]    = useState<LabAssetKind | "">("")
+  const [deleteTarget,  setDeleteTarget]  = useState<LabAsset | null>(null)
   const [deletePending, setDeletePending] = useState(false)
-  const [deleteError, setDeleteError] = useState<{ code: string; message: string } | null>(null)
+  const [deleteError,   setDeleteError]   = useState<{ code: string; message: string } | null>(null)
 
   const fetcher = useCallback(
     () => listLabAssets(kindFilter ? { kind: kindFilter } : undefined),
@@ -161,8 +166,8 @@ export default function LabPage() {
       setDeleteTarget(null)
       refetch()
     } catch (err) {
-      const msg = err instanceof ApiError ? err.message : "Failed to remove asset"
-      const code = err instanceof ApiError ? err.code : "error"
+      const msg  = err instanceof ApiError ? err.message : "Failed to remove asset"
+      const code = err instanceof ApiError ? err.code    : "error"
       setDeleteError({ code, message: msg })
     } finally {
       setDeletePending(false)
@@ -172,109 +177,116 @@ export default function LabPage() {
   const filtered = assets ?? []
 
   return (
-    <div>
-      <div className="mb-6">
-        <h1 className="text-xl font-semibold text-zinc-100">Lab Assets</h1>
-        <p className="mt-0.5 text-sm text-zinc-500">
-          Only assets listed here can be targeted by automated response actions. Nothing outside this list gets touched.
+    <div className="space-y-4">
+
+      {/* ── Header ───────────────────────────────────────────────────────── */}
+      <div>
+        <h1 className="font-case text-2xl font-bold uppercase tracking-wider text-dossier-ink">
+          Lab Environment
+        </h1>
+        <p className="mt-0.5 font-mono text-xs text-dossier-ink/30">
+          Only assets registered here can be targeted by automated response actions.
         </p>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
-        {/* Left: asset list */}
-        <div>
-          {/* Kind filter */}
-          <div className="mb-4 flex flex-wrap items-center gap-2">
-            <span className="text-xs text-zinc-500">Filter:</span>
-            {(["", ...ALL_KINDS] as const).map((k) => (
-              <button
-                key={k || "all"}
-                onClick={() => setKindFilter(k as LabAssetKind | "")}
-                className={`rounded-full border px-2.5 py-0.5 text-xs capitalize transition-colors ${
-                  kindFilter === k
-                    ? "border-indigo-700 bg-indigo-950 text-indigo-300"
-                    : "border-zinc-700 bg-zinc-900 text-zinc-400 hover:border-zinc-600 hover:text-zinc-300"
-                }`}
-              >
-                {k || "all"}
-              </button>
-            ))}
+      <div className="grid gap-6 lg:grid-cols-[1fr_300px]">
+
+        {/* ── Asset list ──────────────────────────────────────────────────── */}
+        <div className="space-y-3">
+
+          {/* Kind filter chips */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="font-mono text-[11px] uppercase tracking-widest text-dossier-ink/25 mr-1">kind</span>
+            {(["", ...ALL_KINDS] as const).map((k) => {
+              const active = kindFilter === k
+              const color  = k ? KIND_STYLE[k as LabAssetKind].text : "#cdd6df"
+              return (
+                <button
+                  key={k || "all"}
+                  onClick={() => setKindFilter(k as LabAssetKind | "")}
+                  className="px-2.5 py-1 font-case text-[11px] font-semibold uppercase tracking-wide border transition-all duration-150"
+                  style={{
+                    borderColor: active ? `${color}55` : "#0c1b2e",
+                    background:  active ? `${color}12` : "transparent",
+                    color:       active ? color : "#cdd6df28",
+                  }}
+                >
+                  {k || "all"}
+                </button>
+              )
+            })}
           </div>
 
-          {error && !assets && (
-            <ErrorState error={error} onRetry={refetch} />
-          )}
+          {error && !assets && <ErrorState error={error} onRetry={refetch} />}
 
           {loading && !assets ? (
             <LabSkeleton />
           ) : filtered.length === 0 ? (
             <EmptyState
               title="No assets registered"
-              hint={kindFilter ? "No assets match this kind filter." : "Use the form on the right to add users, hosts, IPs, or observables you want CyberCat to be able to act on."}
+              hint={
+                kindFilter
+                  ? "No assets match this kind filter."
+                  : "Use the form to add users, hosts, IPs, or observables that CyberCat can act on."
+              }
             />
           ) : (
-            <div className="rounded-lg border border-zinc-800 overflow-hidden">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-zinc-800 bg-zinc-900">
-                    <th className="px-4 py-2.5 text-left text-xs font-medium text-zinc-400 uppercase tracking-wider">Kind</th>
-                    <th className="px-4 py-2.5 text-left text-xs font-medium text-zinc-400 uppercase tracking-wider">Natural key</th>
-                    <th className="px-4 py-2.5 text-left text-xs font-medium text-zinc-400 uppercase tracking-wider">Notes</th>
-                    <th className="px-4 py-2.5 text-left text-xs font-medium text-zinc-400 uppercase tracking-wider">Registered</th>
-                    <th className="px-4 py-2.5" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.map((asset, i) => (
-                    <tr
-                      key={asset.id}
-                      className={`border-b border-zinc-800 last:border-0 ${
-                        i % 2 === 0 ? "bg-zinc-950" : "bg-zinc-900/40"
-                      }`}
+            <div className="border border-dossier-paperEdge overflow-hidden">
+              {/* Column headers */}
+              <div className="flex items-center gap-4 px-4 py-2 border-b border-dossier-paperEdge bg-dossier-stamp">
+                <span className="w-24 shrink-0 font-mono text-[11px] uppercase tracking-widest text-dossier-ink/25">Kind</span>
+                <span className="flex-1 font-mono text-[11px] uppercase tracking-widest text-dossier-ink/25">Natural key</span>
+                <span className="w-40 shrink-0 font-mono text-[11px] uppercase tracking-widest text-dossier-ink/25 hidden md:block">Notes</span>
+                <span className="w-28 shrink-0 font-mono text-[11px] uppercase tracking-widest text-dossier-ink/25 hidden lg:block">Registered</span>
+                <span className="w-14 shrink-0" />
+              </div>
+
+              {filtered.map((asset) => {
+                const ks = KIND_STYLE[asset.kind as LabAssetKind]
+                return (
+                  <div
+                    key={asset.id}
+                    className="flex items-center gap-4 px-4 py-3 border-b border-dossier-paperEdge/40 last:border-0 hover:bg-dossier-paperEdge/20 transition-colors"
+                  >
+                    <span
+                      className="w-24 shrink-0 font-mono text-xs px-1.5 py-0.5 border w-fit"
+                      style={{ color: ks.text, borderColor: ks.border, background: ks.bg }}
                     >
-                      <td className="px-4 py-3">
-                        <span
-                          className={`rounded border px-1.5 py-0.5 font-mono text-xs ${
-                            kindStyles[asset.kind as LabAssetKind]
-                          }`}
-                        >
-                          {asset.kind}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 font-mono text-xs text-zinc-200">
-                        {asset.natural_key}
-                      </td>
-                      <td className="px-4 py-3 text-xs text-zinc-500 max-w-[200px] truncate">
-                        {asset.notes ?? "—"}
-                      </td>
-                      <td className="px-4 py-3 text-xs text-zinc-500">
-                        <RelativeTime at={asset.registered_at} />
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <button
-                          onClick={() => {
-                            setDeleteError(null)
-                            setDeleteTarget(asset)
-                          }}
-                          disabled={!canMutate}
-                          title={!canMutate ? "Read-only role" : undefined}
-                          className="text-xs text-zinc-500 hover:text-red-400 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                        >
-                          Remove
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                      {asset.kind}
+                    </span>
+                    <span className="flex-1 font-mono text-sm text-dossier-ink/80 truncate min-w-0">
+                      {asset.natural_key}
+                    </span>
+                    <span className="w-40 shrink-0 font-mono text-xs text-dossier-ink/30 truncate hidden md:block">
+                      {asset.notes ?? "—"}
+                    </span>
+                    <span className="w-28 shrink-0 font-mono text-xs text-dossier-ink/25 hidden lg:block">
+                      <RelativeTime at={asset.registered_at} />
+                    </span>
+                    <button
+                      onClick={() => { setDeleteError(null); setDeleteTarget(asset) }}
+                      disabled={!canMutate}
+                      title={!canMutate ? "Read-only role" : undefined}
+                      className="w-14 shrink-0 font-mono text-xs text-dossier-ink/20 hover:text-dossier-redaction transition-colors disabled:opacity-30 disabled:cursor-not-allowed text-right"
+                    >
+                      remove
+                    </button>
+                  </div>
+                )
+              })}
             </div>
           )}
         </div>
 
-        {/* Right: add form */}
+        {/* ── Register form ────────────────────────────────────────────────── */}
         <div>
-          <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
-            <h2 className="mb-4 text-sm font-semibold text-zinc-200">Register asset</h2>
+          <div className="border border-dossier-paperEdge bg-dossier-stamp p-5">
+            <div className="flex items-center gap-2 mb-5">
+              <div className="w-[2px] h-4 bg-dossier-evidenceTape" />
+              <h2 className="font-case text-[13px] font-semibold uppercase tracking-widest text-dossier-evidenceTape">
+                Register asset
+              </h2>
+            </div>
             <AddAssetForm onAdded={refetch} canMutate={canMutate} />
           </div>
         </div>

@@ -5,9 +5,9 @@
 @layer base {
   html {
     background-color: #060a0f;
-    color: #c0cdd8;
-    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
-      "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    color: #cdd6df;
+    font-family: var(--font-barlow), "Barlow", ui-sans-serif, system-ui, sans-serif;
+    font-size: 15px;
   }
 
   code,
@@ -74,6 +74,63 @@
 @keyframes svg-pulse-ring {
   0%, 100% { transform: scale(1); opacity: 0.14; }
   50%       { transform: scale(1.9); opacity: 0.02; }
+}
+
+/* Nav rainbow sweep: gradient flows left→right through letter fills on hover */
+@keyframes nav-rainbow-flow {
+  0%   { background-position: 0% center; }
+  100% { background-position: 200% center; }
+}
+
+.nav-link:hover .nav-rainbow-label {
+  background-image: linear-gradient(
+    90deg,
+    #ff2d55,
+    #ff9500,
+    #ffe100,
+    #34c759,
+    #00d4ff,
+    #0a84ff,
+    #bf5af2,
+    #ff2d55
+  );
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  animation: nav-rainbow-flow 2s linear infinite;
+}
+
+/* Auto-playing rainbow — no hover required */
+.rainbow-auto {
+  background-image: linear-gradient(
+    90deg,
+    #ff2d55,
+    #ff9500,
+    #ffe100,
+    #34c759,
+    #00d4ff,
+    #0a84ff,
+    #bf5af2,
+    #ff2d55
+  );
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  animation: nav-rainbow-flow 3s linear infinite;
+}
+
+@keyframes ticker-scroll {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+
+@keyframes threat-pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 6px currentColor; }
+  50%       { opacity: 0.6; box-shadow: 0 0 12px currentColor; }
 }
 
 body::before {
