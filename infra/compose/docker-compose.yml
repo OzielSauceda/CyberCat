@@ -52,6 +52,7 @@ services:
       WAZUH_MANAGER_PASSWORD: ${WAZUH_MANAGER_PASSWORD:-}
       AUTH_REQUIRED: ${AUTH_REQUIRED:-false}
       AUTH_COOKIE_SECRET: ${AUTH_COOKIE_SECRET:-}
+      CCT_AUTOSEED_DEMO: ${CCT_AUTOSEED_DEMO:-true}
     volumes:
       - ./wazuh-config/config/wazuh_indexer_ssl_certs/root-ca.pem:/etc/ssl/certs/wazuh-ca.pem:ro
     depends_on:
@@ -159,7 +160,11 @@ services:
       args:
         REALUSER_PASSWORD: ${LAB_REALUSER_PASSWORD:-lab123}
     hostname: lab-debian
-    profiles: [wazuh]
+    # Available under both --profile agent (Phase 16 default) and
+    # --profile wazuh (legacy). The Wazuh agent baked into the image runs in
+    # both modes; in agent-only mode it never reaches a manager and emits
+    # nothing, which is harmless. See ADR-0011.
+    profiles: [agent, wazuh]
     environment:
       - WAZUH_MANAGER=wazuh-manager
       - WAZUH_REGISTRATION_PASSWORD=${WAZUH_REGISTRATION_PASSWORD:-}
@@ -167,15 +172,60 @@ services:
       - AUDIT_WRITE
       - AUDIT_CONTROL
       - NET_ADMIN
-    depends_on:
-      wazuh-manager:
-        condition: service_healthy
+    volumes:
+      # Share /var/log with the cct-agent so the agent can tail auth.log.
+      - lab_logs:/var/log
     healthcheck:
-      test: ["CMD-SHELL", "pgrep sshd && pgrep wazuh-agentd"]
+      # Drop the wazuh-agentd check — in agent-only mode the manager isn't
+      # running, so the agent's connection state is irrelevant. sshd is the
+      # only process that must be alive for the lab scenario to work.
+      test: ["CMD-SHELL", "pgrep sshd"]
       interval: 10s
       timeout: 5s
       retries: 10
       start_period: 30s
+    restart: unless-stopped
+
+  # ── Tier C: custom telemetry agent (--profile agent) ─────────────────────
+  # Replaces the Wazuh stack as the default telemetry source. See
+  # docs/decisions/ADR-0011-direct-agent-telemetry.md.
+  #
+  # CCT_AGENT_TOKEN is provisioned by start.sh on first run via
+  # `python -m app.cli issue-token --email cct-agent@local --name cct-agent`.
+  cct-agent:
+    build:
+      context: ../../agent
+      dockerfile: Dockerfile
+    profiles: [agent]
+    environment:
+      CCT_API_URL: http://backend:8000
+      CCT_AGENT_TOKEN: ${CCT_AGENT_TOKEN:-}
+      CCT_LOG_PATH: /lab/var/log/auth.log
+      CCT_CHECKPOINT_PATH: /var/lib/cct-agent/checkpoint.json
+      CCT_HOST_NAME: lab-debian
+      CCT_BATCH_SIZE: ${CCT_BATCH_SIZE:-50}
+      CCT_FLUSH_INTERVAL_SECONDS: ${CCT_FLUSH_INTERVAL_SECONDS:-2.0}
+      # Phase 16.9: auditd source for process.created / process.exited.
+      # The lab_logs volume already exposes /var/log/audit/ from lab-debian.
+      CCT_AUDIT_LOG_PATH: /lab/var/log/audit/audit.log
+      CCT_AUDIT_CHECKPOINT_PATH: /var/lib/cct-agent/audit-checkpoint.json
+      CCT_AUDIT_ENABLED: ${CCT_AUDIT_ENABLED:-true}
+      # Phase 16.10: conntrack source for network.connection events.
+      # The lab_logs volume already exposes /var/log/conntrack.log from lab-debian.
+      CCT_CONNTRACK_LOG_PATH: /lab/var/log/conntrack.log
+      CCT_CONNTRACK_CHECKPOINT_PATH: /var/lib/cct-agent/conntrack-checkpoint.json
+      CCT_CONNTRACK_ENABLED: ${CCT_CONNTRACK_ENABLED:-true}
+    volumes:
+      # Same named volume that lab-debian writes /var/log into, mounted
+      # read-only into the agent under a distinct path (so it doesn't
+      # clobber the agent image's own /var/log).
+      - lab_logs:/lab/var/log:ro
+      - cct_agent_state:/var/lib/cct-agent
+    depends_on:
+      backend:
+        condition: service_started
+      lab-debian:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:
@@ -183,3 +233,5 @@ volumes:
   wazuh_indexer_data:
   wazuh_manager_config:
   wazuh_manager_logs:
+  lab_logs:
+  cct_agent_state:

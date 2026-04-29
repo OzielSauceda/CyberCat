@@ -13,6 +13,14 @@ rsyslogd 2>/dev/null || true
 # Start auditd (ignore failure — kernel audit may be unavailable in some environments)
 service auditd start 2>/dev/null || true
 
+# Phase 16.10: spawn conntrack -E to capture netfilter NEW events into a flat log.
+# The cct-agent tails this file via the lab_logs shared volume. Wrapped in a
+# subshell+|| true so a missing kernel netlink (e.g. Docker Desktop on Windows)
+# doesn't abort the entrypoint.
+touch /var/log/conntrack.log
+chmod 644 /var/log/conntrack.log
+( /usr/sbin/conntrack -E -e NEW -o timestamp -o extended -o id >> /var/log/conntrack.log 2>/dev/null & ) || true
+
 # Configure Wazuh agent manager address
 if [ -n "$WAZUH_MANAGER" ]; then
     sed -i "s/<address>.*<\/address>/<address>${WAZUH_MANAGER}<\/address>/" \

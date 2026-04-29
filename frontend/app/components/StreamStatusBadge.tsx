@@ -21,20 +21,20 @@ export default function StreamStatusBadge() {
 
   if (status === "reconnecting") {
     return (
-      <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-700 px-2.5 py-0.5 text-xs text-amber-400">
-        <span className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse" />
-        Reconnecting
+      <span className="inline-flex items-center gap-1.5 rounded border border-amber-800/70 px-2 py-0.5 text-[11px] font-mono tracking-wide text-amber-500/90">
+        <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />
+        STREAM·RECONNECTING
       </span>
     )
   }
 
   return (
     <span
-      className="inline-flex items-center gap-1.5 rounded-full border border-zinc-600 px-2.5 py-0.5 text-xs text-zinc-400"
+      className="inline-flex items-center gap-1.5 rounded border border-dossier-paperEdge px-2 py-0.5 text-[11px] font-mono tracking-wide text-dossier-ink/50"
       title="Live updates unavailable — polling for updates"
     >
-      <span className="h-1.5 w-1.5 rounded-full bg-zinc-500" />
-      Polling
+      <span className="h-1.5 w-1.5 rounded-full bg-dossier-evidenceTape/40" />
+      STREAM·POLLING
     </span>
   )
 }

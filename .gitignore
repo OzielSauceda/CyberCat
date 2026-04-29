@@ -12,6 +12,7 @@ venv/
 
 # Testing / coverage
 .pytest_cache/
+.pytest-basetemp/
 .mypy_cache/
 .coverage
 htmlcov/

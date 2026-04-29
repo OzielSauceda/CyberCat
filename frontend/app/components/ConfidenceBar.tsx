@@ -14,7 +14,7 @@ export function ConfidenceBar({ value }: { value: number }) {
           style={{ width: `${pct}%` }}
         />
       </span>
-      <span className="text-xs tabular-nums text-zinc-400">{pct}%</span>
+      <span className="text-xs tabular-nums text-dossier-ink/70">{pct}%</span>
     </span>
   )
 }

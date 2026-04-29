@@ -249,6 +249,34 @@ class NoteRef(BaseModel):
     created_at: datetime
 ```
 
+### `GET /incidents/{id}/recommended-actions`  (Phase 15)
+Pre-filled, ranked response action suggestions for the incident. Pure derivation from the incident's entities, ATT&CK techniques, and existing actions — no persistence. Read-only; allowed for any authenticated role (`require_user`).
+
+**Response 200:** `list[RecommendedActionOut]`, sorted by `priority` ascending (1 = highest).
+```python
+class RecommendedActionOut(BaseModel):
+    kind: ActionKind                    # never tag_incident, elevate_severity, kill_process_lab
+    params: dict                        # ready to submit to POST /responses
+    rationale: str                      # 1-sentence "why" for the analyst
+    classification: ActionClassification # auto_safe / suggest_only / reversible / disruptive
+    classification_reason: str          # from policy.classify(kind).reason
+    priority: int                       # 1 = highest; sort key
+    target_summary: str                 # short label like "203.0.113.42" for the panel chip
+```
+
+**Behavior:**
+- Up to 4 candidates per call (configurable via `max_results` internally).
+- `params` keys match `ProposeActionModal` form keys exactly so the frontend can pass the dict straight into `prefill.form`. Param-key contract:
+  - `block_observable` → `{"kind": "ip"|"domain"|"hash"|"file", "value": "<value>"}`
+  - `quarantine_host_lab` / `flag_host_in_lab` → `{"host": "<natural_key>"}`
+  - `invalidate_lab_session` → `{"user": "<natural_key>", "host": "<natural_key>"}`
+  - `request_evidence` → `{"evidence_kind": "<kind>", "target_host": "<natural_key>"}`
+- Already-executed-and-not-reverted actions on this incident are filtered out. `block_observable` matches on `(kind, params.value)` only — two block actions on different IPs are distinct candidates.
+- Excluded kinds (`tag_incident`, `elevate_severity`, `kill_process_lab`) are never returned.
+
+**Errors:**
+- 404 `not_found` — incident id does not exist.
+
 ---
 
 ## 4. Entities

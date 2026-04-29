@@ -19,63 +19,105 @@ import {
 import { useStream } from "../lib/useStream"
 
 const ALL_STATUSES: IncidentStatus[] = [
-  "new",
-  "triaged",
-  "investigating",
-  "contained",
-  "resolved",
-  "closed",
+  "new", "triaged", "investigating", "contained", "resolved", "closed",
 ]
 
 const ALL_SEVERITIES: Severity[] = ["critical", "high", "medium", "low", "info"]
 
-const severityBorderLeft: Record<Severity, string> = {
-  info: "border-l-zinc-600",
-  low: "border-l-sky-700",
-  medium: "border-l-amber-600",
-  high: "border-l-orange-600",
-  critical: "border-l-red-600",
+const severityLeftBorder: Record<Severity, string> = {
+  critical: "border-l-dossier-redaction",
+  high:     "border-l-cyber-orange",
+  medium:   "border-l-cyber-yellow",
+  low:      "border-l-sky-500",
+  info:     "border-l-dossier-paperEdge",
 }
 
-function IncidentCard({ incident }: { incident: IncidentSummary }) {
+
+function IncidentCard({
+  incident,
+  tourAttr,
+  idx,
+}: {
+  incident: IncidentSummary
+  tourAttr?: string
+  idx?: number
+}) {
   return (
-    <Link href={`/incidents/${incident.id}`} className="block group">
+    <Link
+      href={`/incidents/${incident.id}`}
+      className="block group"
+      style={{
+        animation: "card-enter 0.45s ease both",
+        animationDelay: `${Math.min((idx ?? 0) * 50, 350)}ms`,
+      }}
+    >
       <article
-        className={`rounded-lg border border-zinc-800 border-l-4 bg-zinc-900 p-4 transition-colors group-hover:border-zinc-700 group-hover:bg-zinc-800/60 ${severityBorderLeft[incident.severity]}`}
+        data-tour={tourAttr}
+        className={`relative rounded-lg border border-dossier-paperEdge border-l-2 bg-dossier-paper transition-all duration-150 group-hover:bg-dossier-paperEdge/50 group-hover:border-dossier-evidenceTape/20 ${severityLeftBorder[incident.severity]}`}
+        style={{ boxShadow: "0 2px 12px rgba(0,0,0,0.5)" }}
       >
-        <div className="mb-2 flex flex-wrap items-center gap-2">
-          <SeverityBadge severity={incident.severity} />
-          <StatusPill status={incident.status} />
-          <span className="ml-auto text-xs text-zinc-500">
-            <RelativeTime at={incident.opened_at} />
-          </span>
+        <div className="px-4 pt-3.5 pb-3">
+          {/* Title row */}
+          <h2 className="text-sm font-semibold leading-snug text-dossier-ink group-hover:text-dossier-evidenceTape transition-colors line-clamp-2 mb-2.5">
+            {incident.title}
+          </h2>
+
+          {/* Meta row: severity + status + time */}
+          <div className="flex flex-wrap items-center gap-2 mb-2.5">
+            <SeverityBadge severity={incident.severity} />
+            <StatusPill status={incident.status} />
+            <span className="ml-auto font-mono text-[10px] text-dossier-ink/30">
+              <RelativeTime at={incident.opened_at} />
+            </span>
+          </div>
+
+          {/* Entity chips */}
+          {(incident.primary_user || incident.primary_host) && (
+            <div className="mb-2.5 flex flex-wrap gap-1.5">
+              {incident.primary_user && (
+                <EntityChip kind="user" naturalKey={incident.primary_user} />
+              )}
+              {incident.primary_host && (
+                <EntityChip kind="host" naturalKey={incident.primary_host} />
+              )}
+            </div>
+          )}
         </div>
 
-        <h2 className="mb-2 line-clamp-2 text-sm font-medium text-zinc-100 group-hover:text-white">
-          {incident.title}
-        </h2>
-
-        {(incident.primary_user || incident.primary_host) && (
-          <div className="mb-3 flex flex-wrap gap-1.5">
-            {incident.primary_user && (
-              <EntityChip kind="user" naturalKey={incident.primary_user} />
-            )}
-            {incident.primary_host && (
-              <EntityChip kind="host" naturalKey={incident.primary_host} />
-            )}
-          </div>
-        )}
-
-        <div className="flex items-center gap-4 text-xs text-zinc-500">
-          <span title="Events">{incident.event_count} events</span>
-          <span title="Detections">{incident.detection_count} detections</span>
-          <span title="Entities">{incident.entity_count} entities</span>
-          <span className="ml-auto font-mono text-zinc-600">
-            {incident.kind.replace(/_/g, " ")}
+        {/* Evidence strip */}
+        <div className="flex items-center gap-4 border-t border-dossier-paperEdge px-4 py-2 font-mono text-[10px] text-dossier-ink/30">
+          <span>{incident.event_count} events</span>
+          <span>{incident.detection_count} detections</span>
+          <span>{incident.entity_count} entities</span>
+          <span className="ml-auto text-dossier-evidenceTape/25">
+            #{incident.id.slice(-6).toUpperCase()}
           </span>
         </div>
       </article>
     </Link>
+  )
+}
+
+function FilterButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean
+  onClick: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`rounded border px-2.5 py-0.5 font-case text-[10px] font-semibold uppercase tracking-widest transition-colors ${
+        active
+          ? "border-dossier-evidenceTape/60 bg-dossier-evidenceTape/10 text-dossier-evidenceTape"
+          : "border-dossier-paperEdge bg-dossier-paper text-dossier-ink/40 hover:border-dossier-evidenceTape/30 hover:text-dossier-ink/70"
+      }`}
+    >
+      {children}
+    </button>
   )
 }
 
@@ -90,12 +132,7 @@ export default function IncidentsPage() {
   const statusStr = statusFilter.join(",")
 
   const fetcher = useCallback(
-    () =>
-      listIncidents({
-        status: statusStr || undefined,
-        severity_gte: severityGte || undefined,
-        limit: 50,
-      }),
+    () => listIncidents({ status: statusStr || undefined, severity_gte: severityGte || undefined, limit: 50 }),
     [statusStr, severityGte],
   )
 
@@ -105,12 +142,7 @@ export default function IncidentsPage() {
     shouldRefetch: (e) => e.type.startsWith("incident."),
   })
 
-  // Keep pagination cursor in sync with polled first page
-  useEffect(() => {
-    if (data) setNextCursor(data.next_cursor)
-  }, [data])
-
-  // Reset extra pages when filters change
+  useEffect(() => { if (data) setNextCursor(data.next_cursor) }, [data])
   useEffect(() => {
     setExtraItems([])
     setNextCursor(null)
@@ -137,73 +169,64 @@ export default function IncidentsPage() {
     }
   }
 
-  const toggleStatus = (s: IncidentStatus) => {
-    setStatusFilter((prev) =>
-      prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s],
-    )
-  }
+  const toggleStatus = (s: IncidentStatus) =>
+    setStatusFilter((prev) => prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s])
 
-  const clearFilters = () => {
-    setStatusFilter([])
-    setSeverityGte("")
-  }
+  const clearFilters = () => { setStatusFilter([]); setSeverityGte("") }
 
   const hasFilters = statusFilter.length > 0 || severityGte !== ""
   const allItems = [...(data?.items ?? []), ...extraItems]
 
   return (
     <div>
-      {/* Page header */}
-      <div className="mb-6 flex items-center justify-between">
+      {/* Header */}
+      <div className="mb-6 flex items-end justify-between gap-4">
         <div>
-          <h1 className="text-xl font-semibold text-zinc-100">Incidents</h1>
+          <p className="font-case text-[9px] uppercase tracking-[0.35em] text-dossier-evidenceTape/50 mb-0.5">
+            Active Investigations
+          </p>
+          <h1 className="font-case text-2xl font-bold uppercase tracking-wider text-dossier-ink">
+            Incidents
+          </h1>
           {data && (
-            <p className="mt-0.5 text-sm text-zinc-500">
-              {data.items.length + extraItems.length} loaded
-              {hasFilters && " (filtered)"}
+            <p className="mt-0.5 font-mono text-[10px] text-dossier-ink/30">
+              {allItems.length} case{allItems.length !== 1 ? "s" : ""}
+              {hasFilters ? " (filtered)" : ""}
             </p>
           )}
         </div>
         {error instanceof ApiError && (
-          <span className="text-xs text-amber-400">Backend unreachable — showing cached data</span>
+          <span className="font-mono text-[10px] text-cyber-orange/80">
+            ⚠ backend unreachable
+          </span>
         )}
       </div>
 
       {/* Filters */}
-      <div className="mb-6 flex flex-wrap items-center gap-3">
-        {/* Status filter */}
-        <div className="flex items-center gap-1">
-          <span className="text-xs text-zinc-500">Status:</span>
-          <div className="flex flex-wrap gap-1">
-            {ALL_STATUSES.map((s) => (
-              <button
-                key={s}
-                onClick={() => toggleStatus(s)}
-                className={`rounded-full border px-2.5 py-0.5 text-xs capitalize transition-colors ${
-                  statusFilter.includes(s)
-                    ? "border-indigo-700 bg-indigo-950 text-indigo-300"
-                    : "border-zinc-700 bg-zinc-900 text-zinc-400 hover:border-zinc-600 hover:text-zinc-300"
-                }`}
-              >
-                {s}
-              </button>
-            ))}
-          </div>
+      <div className="mb-5 flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="font-case text-[9px] uppercase tracking-[0.25em] text-dossier-ink/30 pr-1">
+            Status
+          </span>
+          {ALL_STATUSES.map((s) => (
+            <FilterButton key={s} active={statusFilter.includes(s)} onClick={() => toggleStatus(s)}>
+              {s}
+            </FilterButton>
+          ))}
         </div>
 
-        {/* Severity filter */}
-        <div className="flex items-center gap-1">
-          <span className="text-xs text-zinc-500">Min severity:</span>
+        <div className="flex items-center gap-1.5">
+          <span className="font-case text-[9px] uppercase tracking-[0.25em] text-dossier-ink/30">
+            Min sev
+          </span>
           <select
             value={severityGte}
             onChange={(e) => setSeverityGte(e.target.value as Severity | "")}
-            className="rounded border border-zinc-700 bg-zinc-900 px-2 py-0.5 text-xs text-zinc-300 focus:border-indigo-600 focus:outline-none"
+            className="rounded border border-dossier-paperEdge bg-dossier-paper px-2 py-0.5 font-case text-[10px] uppercase tracking-wider text-dossier-ink/60 focus:border-dossier-evidenceTape focus:outline-none"
           >
             <option value="">Any</option>
             {ALL_SEVERITIES.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
+              <option key={s} value={s}>{s}</option>
             ))}
           </select>
         </div>
@@ -211,49 +234,41 @@ export default function IncidentsPage() {
         {hasFilters && (
           <button
             onClick={clearFilters}
-            className="ml-auto text-xs text-zinc-500 hover:text-zinc-300 underline underline-offset-2 transition-colors"
+            className="ml-auto font-case text-[10px] uppercase tracking-widest text-dossier-redaction/60 hover:text-dossier-redaction underline underline-offset-2 transition-colors"
           >
-            Clear filters
+            Clear ×
           </button>
         )}
       </div>
 
-      {/* Error banner (non-blocking if we have cached data) */}
-      {error && !data && (
-        <div className="mb-6">
-          <ErrorState error={error} onRetry={refetch} />
-        </div>
-      )}
+      {/* Error states */}
+      {error && !data && <div className="mb-6"><ErrorState error={error} onRetry={refetch} /></div>}
       {error && data && (
-        <div className="mb-4 flex items-center gap-2 rounded border border-amber-900 bg-amber-950/30 px-3 py-2 text-xs text-amber-400">
-          <span className="font-bold">!</span>
-          <span>Last refresh failed — {error.message}. Showing cached data.</span>
-          <button onClick={refetch} className="ml-auto underline hover:text-amber-300">
-            Retry
-          </button>
+        <div className="mb-4 flex items-center gap-2 rounded border border-cyber-orange/30 bg-cyber-orange/5 px-3 py-2 font-mono text-[10px] text-cyber-orange">
+          <span>⚠</span>
+          <span>Last refresh failed — {error.message}</span>
+          <button onClick={refetch} className="ml-auto underline hover:text-dossier-evidenceTape">Retry</button>
         </div>
       )}
 
       {/* Content */}
       {loading ? (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <SkeletonCard key={i} />
-          ))}
+        <div className="grid gap-3 sm:grid-cols-2">
+          {Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={i} />)}
         </div>
       ) : allItems.length === 0 ? (
         <EmptyState
-          title="No incidents yet"
+          title={hasFilters ? "No cases match your filters" : "Board is clear"}
           hint={
             hasFilters
-              ? "No incidents match the current filters."
-              : "Seed one via POST /v1/events/raw — see docs/runbook.md."
+              ? "Try loosening the filters or clearing them to see everything."
+              : "Nothing here yet. Load the demo data to explore a sample case, or send events to the backend to start monitoring."
           }
           action={
             hasFilters ? (
               <button
                 onClick={clearFilters}
-                className="text-xs text-indigo-400 hover:text-indigo-300 underline"
+                className="font-case text-[10px] uppercase tracking-widest text-dossier-evidenceTape underline underline-offset-2 hover:text-dossier-ink transition-colors"
               >
                 Clear filters
               </button>
@@ -262,13 +277,17 @@ export default function IncidentsPage() {
         />
       ) : (
         <>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {allItems.map((inc) => (
-              <IncidentCard key={inc.id} incident={inc} />
+          <div className="grid gap-3 sm:grid-cols-2">
+            {allItems.map((inc, idx) => (
+              <IncidentCard
+                key={inc.id}
+                incident={inc}
+                idx={idx}
+                tourAttr={idx === 0 ? "incident-card-first" : undefined}
+              />
             ))}
           </div>
 
-          {/* Load more */}
           {nextCursor && (
             <div className="mt-8 flex justify-center">
               {loadMoreError && (
@@ -279,7 +298,7 @@ export default function IncidentsPage() {
               <button
                 onClick={handleLoadMore}
                 disabled={loadingMore}
-                className="rounded border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100 disabled:opacity-50 transition-colors"
+                className="rounded border border-dossier-paperEdge bg-dossier-paper px-5 py-2 font-case text-[10px] uppercase tracking-widest text-dossier-ink/50 hover:border-dossier-evidenceTape/30 hover:text-dossier-ink transition-colors disabled:opacity-40"
               >
                 {loadingMore ? "Loading…" : "Load more"}
               </button>

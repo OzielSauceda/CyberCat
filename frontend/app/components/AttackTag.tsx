@@ -36,7 +36,7 @@ export function AttackTag({ technique, subtechnique, source, name }: AttackTagPr
       <span
         title={isRule ? "Rule derived" : "Correlator inferred"}
         className={`rounded px-1 text-xs ${
-          isRule ? "bg-zinc-800 text-zinc-400" : "bg-violet-950 text-violet-400"
+          isRule ? "bg-dossier-paperEdge text-dossier-ink/70" : "bg-violet-950 text-violet-400"
         }`}
       >
         {isRule ? "R" : "C"}

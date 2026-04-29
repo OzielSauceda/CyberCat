@@ -4,7 +4,8 @@
 
 @layer base {
   html {
-    @apply bg-zinc-950 text-zinc-100;
+    background-color: #060a0f;
+    color: #c0cdd8;
     font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
       "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   }
@@ -12,27 +13,80 @@
   code,
   pre,
   .font-mono {
-    font-family: ui-monospace, "Cascadia Code", "Source Code Pro", Menlo,
-      Consolas, "DejaVu Sans Mono", monospace;
+    font-family: "IBM Plex Mono", ui-monospace, "Cascadia Code", "Source Code Pro",
+      Menlo, Consolas, "DejaVu Sans Mono", monospace;
   }
 
-  /* Remove default focus ring; we add our own. */
+  .font-case {
+    font-family: var(--font-rajdhani, "system-ui", sans-serif);
+    letter-spacing: 0.04em;
+  }
+
   :focus-visible {
-    @apply outline outline-2 outline-indigo-500 outline-offset-2;
+    @apply outline outline-2 outline-offset-2;
+    outline-color: #00d4ff;
   }
 
-  /* Scrollbar styling for dark theme. */
   ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+    width: 5px;
+    height: 5px;
   }
   ::-webkit-scrollbar-track {
-    @apply bg-zinc-900;
+    background: #060a0f;
   }
   ::-webkit-scrollbar-thumb {
-    @apply bg-zinc-700 rounded;
+    background: #0c1b2e;
+    border-radius: 3px;
   }
   ::-webkit-scrollbar-thumb:hover {
-    @apply bg-zinc-600;
+    background: #00d4ff22;
   }
+
+  ::selection {
+    background: #00d4ff22;
+    color: #00d4ff;
+  }
+}
+
+@keyframes hash-flicker {
+  0%, 100% { opacity: 0.04; }
+  50% { opacity: 0.07; }
+}
+
+@keyframes scanline-sweep {
+  0%   { top: -1px; opacity: 0; }
+  4%   { opacity: 1; }
+  28%  { top: calc(100% + 1px); opacity: 1; }
+  33%  { opacity: 0; }
+  100% { top: calc(100% + 1px); opacity: 0; }
+}
+
+@keyframes cursor-blink {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+
+@keyframes card-enter {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes svg-pulse-ring {
+  0%, 100% { transform: scale(1); opacity: 0.14; }
+  50%       { transform: scale(1.9); opacity: 0.02; }
+}
+
+body::before {
+  content: '';
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent 0px,
+    transparent 3px,
+    rgba(0, 0, 0, 0.022) 3px,
+    rgba(0, 0, 0, 0.022) 4px
+  );
 }

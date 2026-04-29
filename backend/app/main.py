@@ -22,12 +22,14 @@ from app.api.routers import lab_assets as lab_assets_router
 from app.api.routers import responses as responses_router
 from app.api.routers import streaming as streaming_router
 from app.api.routers import wazuh as wazuh_router
+from app.api.admin import router as admin_router
 from app.auth.oidc import discover_oidc
 from app.auth.router import router as auth_router
 from app.config import settings
-from app.db.redis import close_redis, init_redis
-from app.db.session import get_db
+from app.db.redis import close_redis, get_redis, init_redis
+from app.db.session import AsyncSessionLocal, get_db
 from app.ingest.wazuh_poller import poller_loop
+from app.seeder import maybe_seed
 from app.streaming.bus import close_bus, init_bus
 
 
@@ -40,6 +42,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     poller_task = None
     if settings.wazuh_bridge_enabled:
         poller_task = asyncio.create_task(poller_loop(stop_event))
+    if settings.cct_autoseed_demo:
+        asyncio.create_task(maybe_seed(AsyncSessionLocal, get_redis()))
     yield
     stop_event.set()
     if poller_task is not None:
@@ -80,6 +84,7 @@ app.include_router(wazuh_router.router, prefix="/v1")
 app.include_router(evidence_requests_router.router, prefix="/v1")
 app.include_router(blocked_observables_router.router, prefix="/v1")
 app.include_router(streaming_router.router, prefix="/v1")
+app.include_router(admin_router, prefix="/v1")
 
 
 @app.get("/healthz", tags=["ops"])

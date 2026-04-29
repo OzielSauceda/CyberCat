@@ -2,12 +2,12 @@ import Link from "next/link"
 import type { EntityKind } from "../lib/api"
 
 const kindStyles: Record<EntityKind, string> = {
-  user: "text-indigo-300 bg-indigo-950 border-indigo-800",
-  host: "text-violet-300 bg-violet-950 border-violet-800",
-  ip: "text-cyan-300 bg-cyan-950 border-cyan-800",
-  process: "text-lime-300 bg-lime-950 border-lime-800",
-  file: "text-yellow-300 bg-yellow-950 border-yellow-800",
-  observable: "text-pink-300 bg-pink-950 border-pink-800",
+  user:       "text-indigo-200 bg-indigo-950/80 border-indigo-700",
+  host:       "text-violet-200 bg-violet-950/80 border-violet-700",
+  ip:         "text-cyan-200 bg-cyan-950/80 border-cyan-700",
+  process:    "text-lime-200 bg-lime-950/80 border-lime-700",
+  file:       "text-yellow-200 bg-yellow-950/80 border-yellow-700",
+  observable: "text-pink-200 bg-pink-950/80 border-pink-700",
 }
 
 const kindPrefix: Record<EntityKind, string> = {

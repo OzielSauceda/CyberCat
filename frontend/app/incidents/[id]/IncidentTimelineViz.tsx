@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import type { IncidentDetail, TimelineEvent } from "../../lib/api"
 
 type DetectionRef = IncidentDetail["detections"][number]
@@ -30,6 +30,7 @@ const PAD_R = 24
 const BASELINE_Y = 62
 const DETECT_Y = 18
 const AXIS_Y = 90
+const LINE_LEN = SVG_W - PAD_L - PAD_R
 
 function formatDelta(ms: number): string {
   const s = Math.round(ms / 1000)
@@ -56,6 +57,12 @@ export function IncidentTimelineViz({
   const containerRef = useRef<HTMLDivElement>(null)
   const [hover, setHover] = useState<HoverInfo | null>(null)
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 })
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => {
+    const id = setTimeout(() => setMounted(true), 50)
+    return () => clearTimeout(id)
+  }, [])
 
   const { scaledEvents, scaledDetections, ticks, presentLayers } = useMemo(() => {
     if (events.length === 0) {
@@ -108,18 +115,18 @@ export function IncidentTimelineViz({
   if (events.length === 0) return null
 
   return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-900 overflow-hidden">
+    <div className="rounded-lg border border-dossier-paperEdge bg-dossier-paper shadow-dossier overflow-hidden">
       {/* Panel header */}
-      <div className="flex flex-wrap items-center gap-2 border-b border-zinc-800 px-4 py-3">
-        <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
+      <div className="flex flex-wrap items-center gap-2 border-b border-dossier-paperEdge px-4 py-3">
+        <h2 className="text-[10px] font-case font-semibold uppercase tracking-widest text-dossier-evidenceTape">
           Attack timeline
         </h2>
-        <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-xs text-zinc-400">
+        <span className="rounded border border-dossier-paperEdge bg-dossier-paperEdge px-2 py-0.5 text-xs text-dossier-ink/60">
           {events.length} events
         </span>
         <div className="ml-auto flex flex-wrap items-center gap-3">
           {presentLayers.map((layer) => (
-            <span key={layer} className="flex items-center gap-1.5 text-[10px] text-zinc-500">
+            <span key={layer} className="flex items-center gap-1.5 text-[10px] text-dossier-ink/50">
               <span
                 className="inline-block h-2 w-2 rounded-full"
                 style={{ backgroundColor: LAYER[layer]?.fill }}
@@ -128,9 +135,9 @@ export function IncidentTimelineViz({
             </span>
           ))}
           {detections.length > 0 && (
-            <span className="flex items-center gap-1 text-[10px] text-zinc-500">
+            <span className="flex items-center gap-1 text-[10px] text-dossier-ink/50">
               <span className="text-amber-400 text-xs">▲</span>
-              Detection
+              Detection fired
             </span>
           )}
         </div>
@@ -152,16 +159,25 @@ export function IncidentTimelineViz({
           style={{ display: "block" }}
           aria-label="Incident attack timeline"
         >
-          {/* Baseline */}
+          {/* Baseline — draws in from left to right */}
           <line
             x1={PAD_L} y1={BASELINE_Y}
             x2={SVG_W - PAD_R} y2={BASELINE_Y}
             stroke="#3f3f46" strokeWidth={1}
+            strokeDasharray={LINE_LEN}
+            strokeDashoffset={mounted ? 0 : LINE_LEN}
+            style={{ transition: "stroke-dashoffset 0.8s ease 0.05s" }}
           />
 
-          {/* Tick marks */}
+          {/* Tick marks — fade in after baseline */}
           {ticks.map((tick, i) => (
-            <g key={i}>
+            <g
+              key={i}
+              style={{
+                opacity: mounted ? 1 : 0,
+                transition: `opacity 0.35s ease ${300 + i * 55}ms`,
+              }}
+            >
               <line
                 x1={tick.svgX} y1={BASELINE_Y - 3}
                 x2={tick.svgX} y2={BASELINE_Y + 3}
@@ -179,14 +195,18 @@ export function IncidentTimelineViz({
             </g>
           ))}
 
-          {/* Detection connectors + triangles */}
-          {scaledDetections.map((d) => (
+          {/* Detection connectors + triangles — drop in after events */}
+          {scaledDetections.map((d, di) => (
             <g key={d.id}>
               {d.triggerX !== null && (
                 <line
                   x1={d.triggerX} y1={DETECT_Y + 10}
                   x2={d.triggerX} y2={BASELINE_Y}
                   stroke="#78350f" strokeWidth={1} strokeDasharray="3 2"
+                  style={{
+                    opacity: mounted ? 1 : 0,
+                    transition: `opacity 0.3s ease ${750 + di * 80}ms`,
+                  }}
                 />
               )}
               <g
@@ -197,7 +217,11 @@ export function IncidentTimelineViz({
                   })
                 }
                 onMouseLeave={() => setHover(null)}
-                style={{ cursor: "pointer" }}
+                style={{
+                  cursor: "pointer",
+                  opacity: mounted ? 1 : 0,
+                  transition: `opacity 0.3s ease ${680 + di * 80}ms`,
+                }}
               >
                 <polygon
                   points={`${d.svgX},${DETECT_Y} ${d.svgX - 7},${DETECT_Y + 12} ${d.svgX + 7},${DETECT_Y + 12}`}
@@ -209,11 +233,12 @@ export function IncidentTimelineViz({
             </g>
           ))}
 
-          {/* Event dots */}
+          {/* Event dots — stagger fade-in left to right */}
           {scaledEvents.map((ev) => {
             const color = LAYER[ev.layer]?.fill ?? "#71717a"
             const isTrigger = ev.role_in_incident === "trigger"
             const isContext = ev.role_in_incident === "context"
+            const entryDelay = 180 + ((ev.svgX - PAD_L) / LINE_LEN) * 520
 
             return (
               <g
@@ -234,10 +259,24 @@ export function IncidentTimelineViz({
                   })
                 }
                 onMouseLeave={() => setHover(null)}
-                style={{ cursor: "default" }}
+                style={{
+                  cursor: "default",
+                  opacity: mounted ? 1 : 0,
+                  transition: `opacity 0.4s ease ${entryDelay}ms`,
+                }}
               >
+                {/* Trigger event: continuously pulsing glow ring */}
                 {isTrigger && (
-                  <circle cx={ev.svgX} cy={BASELINE_Y} r={ev.r + 6} fill={color} opacity={0.14} />
+                  <circle
+                    cx={ev.svgX} cy={BASELINE_Y} r={ev.r + 6}
+                    fill={color}
+                    style={{
+                      opacity: 0.14,
+                      transformBox: "fill-box",
+                      transformOrigin: "center",
+                      animation: "svg-pulse-ring 2.5s ease-in-out infinite",
+                    }}
+                  />
                 )}
                 <circle
                   cx={ev.svgX}

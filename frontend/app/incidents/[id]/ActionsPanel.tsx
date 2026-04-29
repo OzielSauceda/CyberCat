@@ -1,30 +1,27 @@
 "use client"
 
-import { useState } from "react"
 import { ActionClassificationBadge } from "../../components/ActionClassificationBadge"
 import { EmptyState } from "../../components/EmptyState"
 import { Panel } from "../../components/Panel"
 import { RelativeTime } from "../../components/RelativeTime"
 import type { ActionSummary } from "../../lib/api"
 import { ActionControls } from "./ActionControls"
-import { ProposeActionModal } from "./ProposeActionModal"
 
 interface ActionsPanelProps {
   incidentId: string
   actions: ActionSummary[]
   onMutated: () => void
+  onPropose: () => void
 }
 
-export function ActionsPanel({ incidentId, actions, onMutated }: ActionsPanelProps) {
-  const [proposeOpen, setProposeOpen] = useState(false)
-
+export function ActionsPanel({ incidentId, actions, onMutated, onPropose }: ActionsPanelProps) {
   return (
     <Panel
       title="Response actions"
       count={actions.length}
       headerAction={
         <button
-          onClick={() => setProposeOpen(true)}
+          onClick={onPropose}
           className="rounded border border-zinc-700 bg-zinc-800 px-2 py-0.5 text-xs text-zinc-300 hover:bg-zinc-700 hover:text-zinc-100 transition-colors"
         >
           Propose action
@@ -73,13 +70,6 @@ export function ActionsPanel({ incidentId, actions, onMutated }: ActionsPanelPro
           ))}
         </div>
       )}
-
-      <ProposeActionModal
-        open={proposeOpen}
-        incidentId={incidentId}
-        onClose={() => setProposeOpen(false)}
-        onProposed={() => { setProposeOpen(false); onMutated() }}
-      />
     </Panel>
   )
 }

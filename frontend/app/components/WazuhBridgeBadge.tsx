@@ -30,9 +30,9 @@ export default function WazuhBridgeBadge() {
 
   if (!data || !data.enabled) {
     return (
-      <span className="inline-flex items-center gap-1.5 rounded-full border border-zinc-700 px-2.5 py-0.5 text-xs text-zinc-500">
-        <span className="h-1.5 w-1.5 rounded-full bg-zinc-600" />
-        Bridge off
+      <span className="inline-flex items-center gap-1.5 rounded border border-dossier-paperEdge px-2 py-0.5 text-[11px] font-mono tracking-wide text-dossier-ink/35">
+        <span className="h-1.5 w-1.5 rounded-full bg-dossier-stamp/80" />
+        WAZUH·OFF
       </span>
     )
   }
@@ -40,14 +40,14 @@ export default function WazuhBridgeBadge() {
   if (data.reachable) {
     const label =
       data.lag_seconds !== null && data.lag_seconds < 30
-        ? "Wazuh · live"
+        ? "WAZUH·LIVE"
         : data.last_success_at
-        ? `Wazuh · ${formatLag(data.lag_seconds)}s ago`
-        : "Wazuh · live"
+        ? `WAZUH·${formatLag(data.lag_seconds)}s`
+        : "WAZUH·LIVE"
 
     return (
-      <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-700 px-2.5 py-0.5 text-xs text-emerald-400">
-        <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+      <span className="inline-flex items-center gap-1.5 rounded border border-emerald-800/60 px-2 py-0.5 text-[11px] font-mono tracking-wide text-emerald-500/90">
+        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
         {label}
       </span>
     )
@@ -55,11 +55,11 @@ export default function WazuhBridgeBadge() {
 
   return (
     <span
-      className="inline-flex items-center gap-1.5 rounded-full border border-amber-700 px-2.5 py-0.5 text-xs text-amber-400 cursor-help"
+      className="inline-flex items-center gap-1.5 rounded border border-amber-800/60 px-2 py-0.5 text-[11px] font-mono tracking-wide text-amber-500/80 cursor-help"
       title={data.last_error ?? "Wazuh indexer unreachable"}
     >
-      <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
-      Wazuh unreachable
+      <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+      WAZUH·DOWN
     </span>
   )
 }
