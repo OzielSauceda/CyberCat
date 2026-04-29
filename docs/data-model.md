@@ -122,7 +122,8 @@ The product's center of gravity.
 | `status` | enum(`new`,`triaged`,`investigating`,`contained`,`resolved`,`closed`,`reopened`) | NOT NULL default `'new'` |
 | `severity` | enum(`info`,`low`,`medium`,`high`,`critical`) | NOT NULL |
 | `confidence` | NUMERIC(3,2) | NOT NULL |
-| `rationale` | TEXT | NOT NULL. Human-readable explanation; rewritten on incident growth |
+| `rationale` | TEXT | NOT NULL. Technical explanation; rewritten on incident growth. Carries rule IDs / technique codes / structured detail. |
+| `summary` | TEXT | NULL. Plain-language summary written alongside `rationale` (Phase 18, Alembic 0008). Frontend leads with this; falls back to `rationale` when NULL (older rows). Free of rule IDs and ATT&CK codes. |
 | `opened_at` | TIMESTAMPTZ | NOT NULL default `now()` |
 | `updated_at` | TIMESTAMPTZ | NOT NULL default `now()` |
 | `closed_at` | TIMESTAMPTZ | NULL |

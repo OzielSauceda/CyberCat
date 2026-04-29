@@ -42,7 +42,7 @@ CyberCat/
 │   │   │                         #   block_observable, request_evidence
 │   │   └── db/                   # models.py, session.py, redis.py
 │   ├── alembic/
-│   │   └── versions/             # 0001–0005 (see "Database migrations" below)
+│   │   └── versions/             # 0001–0008 (see "Database migrations" below)
 │   ├── scripts/
 │   │   └── dump_openapi.py       # writes backend/openapi.json
 │   ├── tests/
@@ -361,6 +361,20 @@ Current migrations:
 - `0004_add_wazuh_cursor` — singleton cursor table for Wazuh poller state.
 - `0005_response_state_tables` — `lab_sessions`, `blocked_observables`, `evidence_requests` tables + 3 PG enum types (`blockable_kind`, `evidence_kind`, `evidence_status`).
 - `0006_phase11_action_result_partial` — adds `partial` value to `actionresult` and `actionstatus` PG enums (Phase 11).
+- `0007_multi_operator_auth` — `users`, `api_tokens`, `actor_user_id` audit FKs, legacy sentinel backfill (Phase 14.1). Requires `citext` extension.
+- `0008_add_incident_summary` — adds nullable `incidents.summary TEXT` for plain-language incident summaries (Phase 18). Old rows stay `NULL`; the frontend falls back to `incident.rationale` when `summary` is null.
+
+## Plain-language copy (Phase 18)
+
+User-facing strings flow through two centralized modules so the rest of the app never hardcodes a label:
+
+- `frontend/app/lib/labels.ts` — single source of truth for enum-to-friendly-label maps. Each entry has shape `{ label, plain, slug? }` where `label` is the short visible label, `plain` is a one-sentence definition for tooltips, and `slug` (optional) is the glossary deep-link key. Covers `Severity`, `IncidentStatus`, `IncidentKind`, event kinds, role-in-incident, action classifications/statuses, evidence kinds, attack source, event source, detection rule source, plus an `ATTACK_TACTIC_GLOSS` table.
+- `frontend/app/lib/glossary.ts` — long-form glossary entries (`title` / `short` / `long`) keyed by slug. Renders the canonical definitions in `/help` and powers `JargonTerm` tooltip pop-ups.
+- `frontend/app/components/PlainTerm.tsx` — composite component implementing the hybrid pattern: plain primary label + small muted technical inline + hover tooltip with definition.
+
+When adding a new enum value or a new event kind on the backend, add a matching entry to `labels.ts` and (if it's a domain term) a glossary entry. Don't render raw enum values in the UI.
+
+**Backend incident `summary` field** — the correlator rules in `backend/app/correlation/rules/` write *both* `incident.rationale` (technical, kept for analyst depth and CLAUDE.md §2 explainability) and `incident.summary` (plain-language). The frontend leads with `summary` and shows `rationale` behind a "Show technical detail" expander. The recommendations engine (`backend/app/response/recommendations.py`) follows the same pattern with parallel `_RATIONALES` and `_SUMMARIES` template maps.
 
 ## Multi-operator auth (Phase 14)
 
