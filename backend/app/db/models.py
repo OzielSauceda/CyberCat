@@ -167,6 +167,7 @@ class Incident(Base):
     severity: Mapped[Severity] = mapped_column(_enum(Severity, "severity"), nullable=False)
     confidence: Mapped[Decimal] = mapped_column(sa.Numeric(3, 2), nullable=False)
     rationale: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    summary: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     tags: Mapped[list[str]] = mapped_column(ARRAY(sa.Text), nullable=False, server_default=text("'{}'"))
     opened_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True), nullable=False, server_default=text("now()")

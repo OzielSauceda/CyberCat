@@ -126,11 +126,11 @@ type ThreatInfo = { label: string; color: string; bars: number; glow: string }
 
 function getThreatLevel(incidents: IncidentSummary[]): ThreatInfo {
   const s = incidents.map((i) => i.severity)
-  if (s.includes("critical")) return { label: "CRITICAL", color: "#ff2d55", bars: 5, glow: "rgba(255,45,85,0.4)"  }
-  if (s.includes("high"))     return { label: "HIGH",     color: "#ff6b35", bars: 4, glow: "rgba(255,107,53,0.3)" }
-  if (s.includes("medium"))   return { label: "MEDIUM",   color: "#fbbf24", bars: 3, glow: "rgba(251,191,36,0.25)"}
-  if (incidents.length > 0)   return { label: "ELEVATED", color: "#00d4ff", bars: 2, glow: "rgba(0,212,255,0.25)" }
-  return                              { label: "NOMINAL",  color: "#00ff9f", bars: 1, glow: "rgba(0,255,159,0.2)"  }
+  if (s.includes("critical")) return { label: "CRITICAL",  color: "#ff2d55", bars: 5, glow: "rgba(255,45,85,0.4)"  }
+  if (s.includes("high"))     return { label: "HIGH",      color: "#ff6b35", bars: 4, glow: "rgba(255,107,53,0.3)" }
+  if (s.includes("medium"))   return { label: "MEDIUM",    color: "#fbbf24", bars: 3, glow: "rgba(251,191,36,0.25)"}
+  if (incidents.length > 0)   return { label: "ELEVATED",  color: "#00d4ff", bars: 2, glow: "rgba(0,212,255,0.25)" }
+  return                              { label: "ALL QUIET", color: "#00ff9f", bars: 1, glow: "rgba(0,255,159,0.2)"  }
 }
 
 // ─── Hero Stat Cell ───────────────────────────────────────────────────────────
@@ -368,7 +368,7 @@ function LiveTicker() {
         {display === null ? (
           <div className="flex items-center h-full px-4">
             <span className="font-mono text-[13px] tracking-widest" style={{ color: "#e0eaf330" }}>
-              AWAITING EVENTS…
+              WAITING FOR ACTIVITY…
             </span>
           </div>
         ) : (
@@ -470,7 +470,7 @@ export default function HomePage() {
   const firstDesc = data?.recentIncidents[0]
     ? data.recentIncidents[0].title
     : data?.openCount === 0
-    ? "No active cases — seed demo data to begin"
+    ? "No open cases — load demo data to start"
     : "Loading…"
 
   return (
@@ -493,7 +493,7 @@ export default function HomePage() {
               className="font-mono text-xs uppercase tracking-[0.4em]"
               style={{ color: "#00ff9f65" }}
             >
-              {operatorHandle ? `operator // ${operatorHandle}` : "threat intelligence platform"}
+              {operatorHandle ? `operator // ${operatorHandle}` : "automated incident response"}
             </p>
             <span
               className="font-mono text-xs text-dossier-evidenceTape/35"
@@ -519,19 +519,19 @@ export default function HomePage() {
             label="Open Cases"
             value={data === null ? "—" : data.openCount}
             accent={data?.openCount ? "#ff2d55" : undefined}
-            note={data?.openCount ? "ACTIVE INVESTIGATIONS" : "NO ACTIVE CASES"}
+            note={data?.openCount ? "CASES BEING WORKED" : "ALL QUIET"}
           />
           <HeroStat
             label="Detections Today"
             value={data === null ? "—" : data.detectionsToday >= 50 ? "50+" : data.detectionsToday}
             accent={data?.detectionsToday ? "#fbbf24" : undefined}
-            note="SINCE MIDNIGHT UTC"
+            note="TODAY (UTC)"
           />
           <HeroStat
-            label="Critical Priority"
+            label="Critical So Far"
             value={data === null ? "—" : data.criticalCount}
             accent={data?.criticalCount ? "#ff2d55" : undefined}
-            note="REQUIRE IMMEDIATE ACTION"
+            note="NEED ATTENTION NOW"
           />
 
           {/* Threat level cell */}
@@ -546,7 +546,7 @@ export default function HomePage() {
               className="font-mono text-[13px] uppercase tracking-widest"
               style={{ color: `${threat.color}cc` }}
             >
-              Threat Level
+              Overall Risk
             </span>
             <div className="flex items-end gap-1 my-1.5">
               {[1, 2, 3, 4, 5].map((b) => (
@@ -576,7 +576,7 @@ export default function HomePage() {
               </span>
             ) : (
               <span className="font-mono text-[13px]" style={{ color: "#e0eaf360" }}>
-                MITRE ATT&CK AWARE
+                MAPPED TO ATT&CK
               </span>
             )}
           </div>
@@ -601,9 +601,9 @@ export default function HomePage() {
           </div>
           {[
             "CyberCat v16.10",
-            "Identity + Endpoint XDR",
-            "ATT&CK correlation",
-            "Wazuh opt-in available",
+            "Identity + endpoint",
+            "Mapped to ATT&CK",
+            "Wazuh optional",
           ].map((item) => (
             <div
               key={item}
@@ -631,7 +631,7 @@ export default function HomePage() {
             <div className="flex items-center gap-2.5">
               <div className="w-[2px] h-4 bg-dossier-evidenceTape" />
               <span className="font-case text-[13px] font-semibold uppercase tracking-[0.25em] text-dossier-evidenceTape">
-                Active Intel
+                Open Cases
               </span>
               {data && data.openCount > 0 && (
                 <span
@@ -667,7 +667,7 @@ export default function HomePage() {
               style={{ background: "#030d1a" }}
             >
               <p className="font-mono text-xs tracking-widest" style={{ color: "#cdd6df18" }}>
-                {data === null ? "LOADING INTEL…" : "NO ACTIVE CASES — SYSTEM NOMINAL"}
+                {data === null ? "LOADING CASES…" : "ALL QUIET — NO OPEN CASES"}
               </p>
             </div>
           )}
@@ -676,16 +676,16 @@ export default function HomePage() {
           <div className="grid grid-cols-3 gap-2">
             {[
               {
-                label: "Detection Engine",
-                body: "Sigma + custom detectors. ATT&CK technique mapping on every signal. Confidence scoring.",
+                label: "Detection",
+                body: "Rules match suspicious activity. Each match is mapped to a known attack technique with a confidence score.",
               },
               {
-                label: "Correlation Layer",
-                body: "Related signals grouped into cases. Full evidence chain retained. Explainable at every step.",
+                label: "Correlation",
+                body: "Related signals are grouped into one case. The full chain of evidence is kept so every decision is explainable.",
               },
               {
-                label: "Response Policy",
-                body: "Auto-safe → suggest-only → reversible → disruptive. Every action logged and auditable.",
+                label: "Response",
+                body: "Each action is rated by risk: safe to run automatically, needs approval, can be undone, or potentially disruptive. Everything is logged.",
               },
             ].map((c) => (
               <div
@@ -715,24 +715,24 @@ export default function HomePage() {
           </div>
 
           <NavCard
-            title="Open Investigation"
+            title="Open A Case"
             sub={firstDesc}
             href={firstHref}
             primary
           />
           <NavCard
             title="Detection Rules"
-            sub="Rules that matched activity on your machine. When they fired and how confident."
+            sub="Rules that match suspicious activity. See when each one matched and how confident it was."
             href="/detections"
           />
           <NavCard
             title="Response Actions"
-            sub="Auto-run, pending approval, and rolled-back actions. Full audit trail."
+            sub="Things CyberCat does or proposes. Run automatically, awaiting your approval, or already undone."
             href="/actions"
           />
           <NavCard
-            title="Lab Environment"
-            sub="Sandboxed container for safe response action testing and observation."
+            title="Sandbox Lab"
+            sub="A safe container where response actions are exercised without touching real systems."
             href="/lab"
           />
 

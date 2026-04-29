@@ -24,6 +24,7 @@ class IncidentSummary(BaseModel):
     status: IncidentStatus
     severity: Severity
     confidence: Decimal
+    summary: str | None
     opened_at: datetime
     updated_at: datetime
     entity_count: int
@@ -133,6 +134,7 @@ class NoteIn(BaseModel):
 class RecommendedActionOut(BaseModel):
     kind: ActionKind
     params: dict
+    summary: str
     rationale: str
     classification: ActionClassification
     classification_reason: str
@@ -148,6 +150,7 @@ class IncidentDetail(BaseModel):
     severity: Severity
     confidence: Decimal
     rationale: str
+    summary: str | None
     opened_at: datetime
     updated_at: datetime
     closed_at: datetime | None

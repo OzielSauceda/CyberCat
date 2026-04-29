@@ -1,4 +1,8 @@
+"use client"
+
+import * as Tooltip from "@radix-ui/react-tooltip"
 import type { ActionStatus, IncidentStatus } from "../lib/api"
+import { ACTION_STATUS_LABELS, INCIDENT_STATUS_LABELS } from "../lib/labels"
 
 const styles: Record<IncidentStatus | ActionStatus, string> = {
   // incident statuses
@@ -18,13 +22,51 @@ const styles: Record<IncidentStatus | ActionStatus, string> = {
   partial:       "text-yellow-300 bg-yellow-950 border-yellow-700",
 }
 
+const INCIDENT_STATUSES = new Set([
+  "new",
+  "triaged",
+  "investigating",
+  "contained",
+  "resolved",
+  "closed",
+  "reopened",
+])
+
+function lookup(status: IncidentStatus | ActionStatus): { label: string; plain: string } {
+  if (INCIDENT_STATUSES.has(status)) {
+    const e = INCIDENT_STATUS_LABELS[status as IncidentStatus]
+    return { label: e.label, plain: e.plain }
+  }
+  const e = ACTION_STATUS_LABELS[status as ActionStatus]
+  return { label: e.label, plain: e.plain }
+}
+
 export function StatusPill({ status }: { status: IncidentStatus | ActionStatus }) {
   const cls = styles[status] ?? "text-zinc-400 bg-zinc-900 border-zinc-700"
+  const { label, plain } = lookup(status)
+
   return (
-    <span
-      className={`inline-flex items-center rounded border px-2 py-0.5 text-[10px] font-case font-medium uppercase tracking-widest ${cls}`}
-    >
-      {status}
-    </span>
+    <Tooltip.Provider delayDuration={300} skipDelayDuration={100}>
+      <Tooltip.Root>
+        <Tooltip.Trigger asChild>
+          <span
+            className={`inline-flex cursor-help items-center rounded border px-2 py-0.5 text-[10px] font-case font-medium uppercase tracking-widest ${cls}`}
+          >
+            {label}
+          </span>
+        </Tooltip.Trigger>
+        <Tooltip.Portal>
+          <Tooltip.Content
+            sideOffset={6}
+            className="z-50 max-w-[260px] rounded border border-dossier-paperEdge bg-dossier-paper px-3 py-2.5 shadow-xl"
+          >
+            <p className="mb-1 font-case text-[11px] text-dossier-ink">{label}</p>
+            <p className="text-xs leading-snug text-dossier-ink/60">{plain}</p>
+            <p className="mt-1 font-mono text-[10px] text-dossier-ink/30">{status}</p>
+            <Tooltip.Arrow className="fill-dossier-paperEdge" />
+          </Tooltip.Content>
+        </Tooltip.Portal>
+      </Tooltip.Root>
+    </Tooltip.Provider>
   )
 }

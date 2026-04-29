@@ -52,6 +52,7 @@ export interface IncidentSummary {
   status: IncidentStatus
   severity: Severity
   confidence: number
+  summary: string | null
   opened_at: string
   updated_at: string
   entity_count: number
@@ -151,6 +152,7 @@ export interface IncidentDetail {
   severity: Severity
   confidence: number
   rationale: string
+  summary: string | null
   opened_at: string
   updated_at: string
   closed_at: string | null
@@ -255,6 +257,7 @@ export function getIncident(id: string): Promise<IncidentDetail> {
 export interface RecommendedAction {
   kind: ActionKind
   params: Record<string, unknown>
+  summary: string
   rationale: string
   classification: ActionClassification
   classification_reason: string

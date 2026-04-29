@@ -54,11 +54,11 @@ export default function HelpPage() {
       {/* Page header */}
       <header className="border-b border-dossier-evidenceTape/15 pb-5">
         <p className="font-case text-[9px] uppercase tracking-[0.35em] text-dossier-evidenceTape/50 mb-1.5">
-          Case Reference
+          Reference
         </p>
         <h1 className="font-case text-2xl text-dossier-ink">Help &amp; Glossary</h1>
         <p className="mt-1 text-xs text-dossier-ink/50">
-          Plain-English explanations for every term in the app. Hover any underlined word while investigating to see a quick definition, or browse the full list below.
+          Plain-English explanations for every term in the app. New to security? Start here. Anywhere you see an underlined word in the app, hovering it pops up the same definition you&apos;ll find below.
         </p>
       </header>
 
@@ -138,10 +138,10 @@ export default function HelpPage() {
       {/* Footer nav */}
       <section className="border-t border-dossier-paperEdge pt-6">
         <div className="flex flex-wrap gap-6 text-xs text-dossier-ink/35">
-          <Link href="/" className="transition-colors hover:text-dossier-ink">← Case board home</Link>
-          <Link href="/incidents" className="transition-colors hover:text-dossier-ink">Open incidents</Link>
-          <Link href="/detections" className="transition-colors hover:text-dossier-ink">Detection rules</Link>
-          <Link href="/actions" className="transition-colors hover:text-dossier-ink">Response actions</Link>
+          <Link href="/" className="transition-colors hover:text-dossier-ink">← Home</Link>
+          <Link href="/incidents" className="transition-colors hover:text-dossier-ink">Incidents</Link>
+          <Link href="/detections" className="transition-colors hover:text-dossier-ink">Detections</Link>
+          <Link href="/actions" className="transition-colors hover:text-dossier-ink">Actions</Link>
           <span className="ml-auto">Runbook: <code className="font-mono text-dossier-evidenceTape/35">docs/runbook.md</code></span>
         </div>
       </section>

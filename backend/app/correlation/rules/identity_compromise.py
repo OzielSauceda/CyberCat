@@ -95,6 +95,18 @@ async def identity_compromise(
         f"Pattern consistent with successful credential guessing or password spraying."
     )
 
+    if failure_count > 0:
+        summary = (
+            f"{user} signed in from a new address ({source_ip}) right after "
+            f"{failure_count} failed attempt{'s' if failure_count != 1 else ''}. "
+            f"This often means someone guessed the password."
+        )
+    else:
+        summary = (
+            f"{user} signed in from a new address ({source_ip}) that hasn't been "
+            f"seen before. Worth checking whether this is the real person."
+        )
+
     incident = Incident(
         id=uuid.uuid4(),
         title=f"Suspicious sign-in for {user} from new source {source_ip}",
@@ -103,6 +115,7 @@ async def identity_compromise(
         severity=Severity.high,
         confidence=Decimal("0.80"),
         rationale=rationale,
+        summary=summary,
         correlator_version="1.0.0",
         correlator_rule="identity_compromise",
         dedupe_key=dedupe_key,

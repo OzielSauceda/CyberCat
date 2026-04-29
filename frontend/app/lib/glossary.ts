@@ -150,6 +150,26 @@ export const GLOSSARY = {
     short: "Where the incident is in its lifecycle: new → triaged → investigating → contained → resolved → closed.",
     long: "Incidents move through a defined lifecycle. 'new' means just created by the correlator. 'triaged' means an analyst has reviewed it. 'investigating' means active work is underway. 'contained' means the threat has been isolated. 'resolved' means the root cause is addressed. 'closed' means no further action needed. Incidents can be 'reopened' if new signals arrive.",
   },
+  "incident-kind": {
+    title: "Incident Kind",
+    short: "What kind of compromise pattern this case represents.",
+    long: "CyberCat groups incidents into a few high-level kinds based on which signals were involved: suspicious sign-in activity (identity_compromise), suspicious activity on a machine (endpoint_compromise), a compromised account that's now acting on a machine (identity_endpoint_chain), and unclassified. The kind drives which response actions are recommended.",
+  },
+  "evidence-kind": {
+    title: "Evidence Kind",
+    short: "The type of forensic artifact requested from a host.",
+    long: "Evidence requests come in a few flavors: a triage log (a quick health snapshot), a process list (every running program at the time), open network connections, and a memory snapshot (the heaviest, most invasive option). Choose the lightest evidence kind that answers the question.",
+  },
+  "role-in-incident": {
+    title: "Role in incident",
+    short: "How this event fits into the case: trigger, supporting, or background.",
+    long: "Each event linked to an incident has a role. The trigger is the event that opened the case. Supporting events help confirm or build on the trigger. Background events are surrounding activity included for context. The timeline is colored by role so you can see the trigger at a glance.",
+  },
+  "observable-kind": {
+    title: "Observable kind",
+    short: "What kind of artifact an observable is: IP, domain, file hash, or path.",
+    long: "Observables are concrete artifacts associated with a threat. CyberCat tracks four kinds: IP addresses, domain names, file hashes, and file paths. The kind determines how the observable is matched against future events and what blocking it means in practice.",
+  },
 } satisfies Record<string, GlossaryEntry>
 
 export type GlossarySlug = keyof typeof GLOSSARY

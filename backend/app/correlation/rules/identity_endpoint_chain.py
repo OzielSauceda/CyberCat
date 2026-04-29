@@ -137,6 +137,12 @@ async def identity_endpoint_chain(
         f"hands-on-keyboard intrusion."
     )
 
+    summary = (
+        f"{user_entity.natural_key} just had a suspicious sign-in, and now their "
+        f"account is running unusual programs on {host_key}. This is the strongest "
+        f"sign yet that someone else has the account."
+    )
+
     incident = Incident(
         id=uuid.uuid4(),
         title=f"Identity + endpoint compromise chain: {user_entity.natural_key} @ {host_key}",
@@ -145,6 +151,7 @@ async def identity_endpoint_chain(
         severity=Severity.high,
         confidence=Decimal("0.85"),
         rationale=rationale,
+        summary=summary,
         correlator_version="1.0.0",
         correlator_rule="identity_endpoint_chain",
         dedupe_key=dedupe_key,

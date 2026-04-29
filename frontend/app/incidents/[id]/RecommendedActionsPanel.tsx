@@ -122,8 +122,18 @@ export function RecommendedActionsPanel({
                 </button>
               </div>
               <p className="text-sm text-zinc-300 mb-2 leading-snug">
-                {rec.rationale}
+                {rec.summary || rec.rationale}
               </p>
+              {rec.summary && rec.rationale && rec.summary !== rec.rationale ? (
+                <details className="mb-2 group">
+                  <summary className="cursor-pointer font-case text-[10px] uppercase tracking-widest text-zinc-500 transition-colors hover:text-dossier-evidenceTape">
+                    Why this works
+                  </summary>
+                  <p className="mt-1.5 text-xs leading-snug text-zinc-400 font-mono">
+                    {rec.rationale}
+                  </p>
+                </details>
+              ) : null}
               {isEntityChipParam(rec) && (
                 <div className="flex flex-wrap gap-1">
                   <EntityChip

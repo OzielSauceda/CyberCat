@@ -34,6 +34,7 @@ from app.response.policy import classify
 class RecommendedAction:
     kind: ActionKind
     params: dict[str, Any]
+    summary: str
     rationale: str
     classification: ActionClassification
     classification_reason: str
@@ -124,6 +125,43 @@ _RATIONALES: dict[tuple[ActionKind, str | None], str] = {
     ),
 }
 
+# Plain-language one-line summaries paired with each rationale entry. Same
+# keying scheme: (ActionKind, technique-prefix-or-None). These are what the UI
+# leads with; the longer technical rationale shows in a "Why this works" expander.
+_SUMMARIES: dict[tuple[ActionKind, str | None], str] = {
+    (ActionKind.block_observable, "T1110"): (
+        "Block the address ({ip}) someone's been guessing passwords from."
+    ),
+    (ActionKind.block_observable, "T1071"): (
+        "Block the address ({ip}) the host has been talking to — looks like attacker control traffic."
+    ),
+    (ActionKind.block_observable, "T1571"): (
+        "Block the address ({ip}) the host has been talking to — looks like attacker control traffic."
+    ),
+    (ActionKind.block_observable, None): (
+        "Block the address ({ip}) involved in this case so it can't act again."
+    ),
+    (ActionKind.quarantine_host_lab, "T1021"): (
+        "Cut {host} off from the lab network so the attacker can't move further."
+    ),
+    (ActionKind.quarantine_host_lab, "T1059"): (
+        "Cut {host} off from the lab network so the attacker can't move further."
+    ),
+    (ActionKind.quarantine_host_lab, None): (
+        "Hold {host} aside while you investigate."
+    ),
+    (ActionKind.invalidate_lab_session, None): (
+        "Sign {user} out on {host} in case the password is in the wrong hands."
+    ),
+    (ActionKind.flag_host_in_lab, None): (
+        "Mark {host} as under investigation so it stands out in dashboards."
+    ),
+    (ActionKind.request_evidence, None): (
+        "Pull a {evidence_kind} from {host} to help figure out what happened."
+    ),
+}
+
+
 # These kinds are never surfaced as recommendations (admin/meta actions)
 _EXCLUDED: frozenset[ActionKind] = frozenset({
     ActionKind.tag_incident,
@@ -160,6 +198,23 @@ def _build_rationale(
         host=params.get("host") or params.get("target_host", ""),
         user=params.get("user", ""),
         evidence_kind=params.get("evidence_kind", EvidenceKind.triage_log.value),
+    )
+
+
+def _build_summary(
+    kind: ActionKind,
+    best_prefix: str | None,
+    params: dict[str, Any],
+) -> str:
+    key = (kind, best_prefix)
+    template = _SUMMARIES.get(key) or _SUMMARIES.get((kind, None), "")
+    evidence_kind_raw = params.get("evidence_kind", EvidenceKind.triage_log.value)
+    evidence_kind_plain = evidence_kind_raw.replace("_", " ")
+    return template.format(
+        ip=params.get("value", ""),
+        host=params.get("host") or params.get("target_host", ""),
+        user=params.get("user", ""),
+        evidence_kind=evidence_kind_plain,
     )
 
 
@@ -282,6 +337,7 @@ def recommend_for_incident(
         results.append(RecommendedAction(
             kind=kind,
             params=params,
+            summary=_build_summary(kind, best_prefix, params),
             rationale=_build_rationale(kind, best_prefix, params),
             classification=decision.classification,
             classification_reason=decision.reason,

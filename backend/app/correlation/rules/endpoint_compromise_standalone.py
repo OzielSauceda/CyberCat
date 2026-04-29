@@ -94,6 +94,12 @@ async def endpoint_compromise_standalone(
         f"without corroborating identity activity in the last 30 minutes."
     )
 
+    summary = (
+        f"Unusual program activity was seen on {host_natural_key}, but no related "
+        f"sign-in trouble in the last 30 minutes. Worth a look — could be a "
+        f"misbehaving program or an early sign of intrusion."
+    )
+
     incident = Incident(
         id=uuid.uuid4(),
         title=f"Suspicious endpoint activity on {host_natural_key}",
@@ -102,6 +108,7 @@ async def endpoint_compromise_standalone(
         severity=Severity.medium,
         confidence=Decimal("0.60"),
         rationale=rationale,
+        summary=summary,
         correlator_version="1.0.0",
         correlator_rule="endpoint_compromise_standalone",
         dedupe_key=dedup_redis_key,

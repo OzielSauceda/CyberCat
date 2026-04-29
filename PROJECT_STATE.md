@@ -2,7 +2,7 @@
 
 Living status document. Update as reality changes. Short, current, honest.
 
-Last updated: 2026-04-28 — **Phase 17.7 ⚠ CODE COMPLETE, SPOT-FIX PENDING.** Sub-phases 17.1–17.7 all shipped (typecheck 0 errors). 17.8 (docs/ADR/smoke/renumber) still outstanding. A spot-fix aesthetic pass on 17.2 (NavBar, HelpMenu) and 17.3 (welcome page) is queued — those sub-phases were built without the `frontend-design` skill and card bodies fall back to generic zinc rather than full dossier palette. The skill must be invoked for the spot-fix and all remaining frontend work.
+Last updated: 2026-04-29 — **Phase 18 ✅ CODE COMPLETE.** Site-wide plain-language rewrite. New `frontend/app/lib/labels.ts` + `PlainTerm` component, extended glossary, dashboard/incidents/detail/detections/actions/help all rewritten so non-experts can read the UI without a dictionary. Backend gained `Incident.summary` (Alembic 0008) populated by all three correlator rules + the recommendations engine. Backend tests 174/174 pass (added `test_summary_jargon.py`); frontend typecheck clean; Phase 15 smoke 19/19 pass. Phase 17.8 docs/renumber still outstanding from prior phase.
 
 ---
 
