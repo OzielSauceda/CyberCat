@@ -28,14 +28,7 @@ export default function WazuhBridgeBadge() {
     fallbackPollMs: 15_000,
   })
 
-  if (!data || !data.enabled) {
-    return (
-      <span className="inline-flex items-center gap-1.5 rounded border border-dossier-paperEdge px-2 py-0.5 text-[11px] font-mono tracking-wide text-dossier-ink/35">
-        <span className="h-1.5 w-1.5 rounded-full bg-dossier-stamp/80" />
-        WAZUH·OFF
-      </span>
-    )
-  }
+  if (!data || !data.enabled) return null
 
   if (data.reachable) {
     const label =
@@ -46,7 +39,7 @@ export default function WazuhBridgeBadge() {
         : "WAZUH·LIVE"
 
     return (
-      <span className="inline-flex items-center gap-1.5 rounded border border-emerald-800/60 px-2 py-0.5 text-[11px] font-mono tracking-wide text-emerald-500/90">
+      <span className="inline-flex items-center gap-1.5 rounded border border-emerald-800/60 px-2 py-0.5 text-[13px] font-mono tracking-wide text-emerald-500/90">
         <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
         {label}
       </span>
@@ -55,7 +48,7 @@ export default function WazuhBridgeBadge() {
 
   return (
     <span
-      className="inline-flex items-center gap-1.5 rounded border border-amber-800/60 px-2 py-0.5 text-[11px] font-mono tracking-wide text-amber-500/80 cursor-help"
+      className="inline-flex items-center gap-1.5 rounded border border-amber-800/60 px-2 py-0.5 text-[13px] font-mono tracking-wide text-amber-500/80 cursor-help"
       title={data.last_error ?? "Wazuh indexer unreachable"}
     >
       <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />

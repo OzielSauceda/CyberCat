@@ -48,20 +48,41 @@ export default function UserBadge() {
   }
 
   return (
-    <div className="flex items-center gap-2">
-      <span
-        className={`inline-flex items-center rounded border px-2 py-0.5 text-[11px] font-mono tracking-wide ${roleColor}`}
+    <div className="flex items-center gap-1.5">
+      {/* Operator icon */}
+      <svg
+        width="11" height="11" viewBox="0 0 24 24" fill="none"
+        stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"
+        className="shrink-0 text-dossier-ink/25"
+        aria-hidden
       >
+        <rect x="2" y="3" width="20" height="14" rx="2" />
+        <path d="M8 21h8M12 17v4" />
+        <path d="M7 10l3 3-3 3" />
+        <line x1="13" y1="16" x2="17" y2="16" />
+      </svg>
+
+      {/* Role pill */}
+      <span className={`inline-flex items-center rounded border px-1.5 py-0.5 text-xs font-mono tracking-widest ${roleColor}`}>
         {roleLabel}
       </span>
-      <span className="text-[11px] font-mono text-dossier-ink/50 tracking-wide">{user.email}</span>
+
+      {/* Email */}
+      <span className="font-mono text-[13px] text-dossier-ink/55 tracking-wide max-w-[140px] truncate">
+        {user.email}
+      </span>
+
+      {/* Sign out */}
       {authConfig?.auth_required && (
-        <button
-          onClick={handleSignOut}
-          className="text-[11px] font-mono text-dossier-ink/30 transition-colors hover:text-dossier-ink/70 tracking-wide"
-        >
-          SIGN·OUT
-        </button>
+        <>
+          <div className="h-3 w-px bg-dossier-paperEdge mx-0.5" />
+          <button
+            onClick={handleSignOut}
+            className="font-mono text-xs uppercase tracking-widest text-dossier-ink/25 transition-colors hover:text-dossier-ink/60"
+          >
+            ⏻
+          </button>
+        </>
       )}
     </div>
   )
