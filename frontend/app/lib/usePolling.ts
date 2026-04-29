@@ -28,6 +28,17 @@ export function usePolling<T>(
   const fetcherRef = useRef(fetcher)
   fetcherRef.current = fetcher
 
+  // When the fetcher identity changes (filter params changed), immediately
+  // re-fetch instead of waiting for the next polling interval.
+  const prevFetcherRef = useRef(fetcher)
+  useEffect(() => {
+    if (prevFetcherRef.current !== fetcher) {
+      prevFetcherRef.current = fetcher
+      setLoading(true)
+      setTick((t) => t + 1)
+    }
+  }, [fetcher])
+
   useEffect(() => {
     let cancelled = false
 

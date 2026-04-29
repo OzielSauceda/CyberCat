@@ -16,10 +16,6 @@ import {
 } from "../lib/api"
 import { useStream } from "../lib/useStream"
 
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
 const ACTION_KINDS: ActionKind[] = [
   "tag_incident",
   "elevate_severity",
@@ -32,34 +28,22 @@ const ACTION_KINDS: ActionKind[] = [
 ]
 
 const CLASSIFICATION_OPTIONS: Array<ActionClassification | ""> = [
-  "",
-  "auto_safe",
-  "suggest_only",
-  "reversible",
-  "disruptive",
+  "", "auto_safe", "suggest_only", "reversible", "disruptive",
 ]
 
 const STATUS_OPTIONS: Array<ActionStatus | ""> = [
-  "",
-  "proposed",
-  "executed",
-  "failed",
-  "skipped",
-  "reverted",
+  "", "proposed", "executed", "failed", "skipped", "reverted",
 ]
 
 type SinceKey = "1h" | "24h" | "7d" | "all"
 const SINCE_LABELS: Record<SinceKey, string> = {
-  "1h": "Last 1h",
-  "24h": "Last 24h",
-  "7d": "Last 7d",
-  all: "All time",
+  "1h": "1h", "24h": "24h", "7d": "7d", all: "all",
 }
 
 function sinceIso(key: SinceKey): string | undefined {
-  if (key === "1h") return new Date(Date.now() - 3_600_000).toISOString()
+  if (key === "1h")  return new Date(Date.now() - 3_600_000).toISOString()
   if (key === "24h") return new Date(Date.now() - 86_400_000).toISOString()
-  if (key === "7d") return new Date(Date.now() - 604_800_000).toISOString()
+  if (key === "7d")  return new Date(Date.now() - 604_800_000).toISOString()
   return undefined
 }
 
@@ -74,102 +58,89 @@ function targetFromParams(params: Record<string, unknown>): string | null {
   return v != null ? String(v) : null
 }
 
-// ---------------------------------------------------------------------------
-// Row component
-// ---------------------------------------------------------------------------
+// ── Filter chip ───────────────────────────────────────────────────────────────
+
+function Chip({
+  label, active, onClick,
+}: {
+  label: string; active: boolean; onClick: () => void
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className="px-2.5 py-1 font-case text-[11px] font-semibold uppercase tracking-wide border transition-all duration-150"
+      style={{
+        borderColor: active ? "#00d4ff55" : "#0c1b2e",
+        background:  active ? "#00d4ff12" : "transparent",
+        color:       active ? "#00d4ff"   : "#cdd6df28",
+      }}
+    >
+      {label}
+    </button>
+  )
+}
+
+// ── Action row ────────────────────────────────────────────────────────────────
 
 function ActionRow({ action }: { action: ActionSummary }) {
   const target = targetFromParams(action.params)
   return (
-    <tr className="border-b border-zinc-800 hover:bg-zinc-900/60 transition-colors">
-      <td className="px-3 py-2.5">
+    <div className="flex items-center gap-4 border border-dossier-paperEdge bg-dossier-stamp px-4 py-3 overflow-hidden transition-colors hover:bg-dossier-paperEdge/20">
+      {/* Classification badge */}
+      <div className="shrink-0">
         <ActionClassificationBadge classification={action.classification} />
-      </td>
-      <td className="px-3 py-2.5 font-mono text-sm text-zinc-300">{action.kind}</td>
-      <td className="px-3 py-2.5">
+      </div>
+
+      {/* Kind */}
+      <span className="flex-1 font-mono text-sm text-dossier-ink/80 truncate min-w-0">
+        {action.kind}
+      </span>
+
+      {/* Status */}
+      <div className="shrink-0">
         <StatusPill status={action.status} />
-      </td>
-      <td className="px-3 py-2.5 text-xs text-zinc-400">
-        <span
-          className={`rounded border px-1.5 py-0.5 text-xs ${
-            action.proposed_by === "system"
-              ? "border-zinc-700 bg-zinc-900 text-zinc-500"
-              : "border-indigo-800 bg-indigo-950 text-indigo-300"
-          }`}
-        >
-          {action.proposed_by}
-        </span>
-      </td>
-      <td className="px-3 py-2.5 text-xs text-zinc-400">
+      </div>
+
+      {/* Target */}
+      <span className="shrink-0 font-mono text-xs text-dossier-ink/35 hidden md:block max-w-[150px] truncate">
+        {target ?? <span className="text-dossier-ink/15">—</span>}
+      </span>
+
+      {/* Proposed by */}
+      <span
+        className={`shrink-0 font-mono text-xs px-1.5 py-0.5 border hidden lg:block ${
+          action.proposed_by === "system"
+            ? "border-dossier-paperEdge text-dossier-ink/30"
+            : "border-dossier-evidenceTape/30 text-dossier-evidenceTape/60"
+        }`}
+      >
+        {action.proposed_by}
+      </span>
+
+      {/* Time */}
+      <span className="shrink-0 font-mono text-xs text-dossier-ink/25 whitespace-nowrap">
         <RelativeTime at={action.proposed_at} />
-      </td>
-      <td className="px-3 py-2.5 font-mono text-xs text-zinc-400">
-        {target ?? <span className="text-zinc-600">—</span>}
-      </td>
-      <td className="px-3 py-2.5 text-xs">
-        {action.last_log?.executed_by ? (
-          <span className="text-zinc-500">{action.last_log.executed_by}</span>
-        ) : (
-          <span className="text-zinc-600">—</span>
-        )}
-      </td>
-      <td className="px-3 py-2.5 text-xs">
-        {/* incident_id is not in ActionSummary directly — navigate via proposed_by=system hint */}
-        <span className="text-zinc-600 text-xs">view on incident</span>
-      </td>
-    </tr>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// ActionRowWithLink — fetches incident context from params
-// ---------------------------------------------------------------------------
-
-function ActionTable({ items }: { items: ActionSummary[] }) {
-  return (
-    <div className="overflow-x-auto rounded-lg border border-zinc-800">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-zinc-800 bg-zinc-900/60 text-left text-xs font-medium text-zinc-500 uppercase tracking-wide">
-            <th className="px-3 py-2">Classification</th>
-            <th className="px-3 py-2">Kind</th>
-            <th className="px-3 py-2">Status</th>
-            <th className="px-3 py-2">Proposed by</th>
-            <th className="px-3 py-2">When</th>
-            <th className="px-3 py-2">Target</th>
-            <th className="px-3 py-2">Executed by</th>
-            <th className="px-3 py-2"></th>
-          </tr>
-        </thead>
-        <tbody>
-          {items.map((a) => (
-            <ActionRow key={a.id} action={a} />
-          ))}
-        </tbody>
-      </table>
+      </span>
     </div>
   )
 }
 
-// ---------------------------------------------------------------------------
-// Page
-// ---------------------------------------------------------------------------
+// ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function ActionsPage() {
   const [statusFilter, setStatusFilter] = useState<ActionStatus | "">("")
-  const [classFilter, setClassFilter] = useState<ActionClassification | "">("")
-  const [kindFilter, setKindFilter] = useState<ActionKind | "">("")
-  const [sinceKey, setSinceKey] = useState<SinceKey>("24h")
+  const [classFilter,  setClassFilter]  = useState<ActionClassification | "">("")
+  const [kindFilter,   setKindFilter]   = useState<ActionKind | "">("")
+  const [sinceKey,     setSinceKey]     = useState<SinceKey>("24h")
 
   const fetcher = useCallback(
-    () =>
-      listActions({
-        status: statusFilter || undefined,
-        classification: classFilter || undefined,
-        kind: kindFilter || undefined,
-        since: sinceIso(sinceKey),
-        limit: 50,
-      }),
+    () => listActions({
+      status:         statusFilter || undefined,
+      classification: classFilter  || undefined,
+      kind:           kindFilter   || undefined,
+      since:          sinceIso(sinceKey),
+      limit:          50,
+    }),
     [statusFilter, classFilter, kindFilter, sinceKey],
   )
 
@@ -192,128 +163,97 @@ export default function ActionsPage() {
   const allItems = data?.items ?? []
 
   return (
-    <div>
-      <div className="mb-6 flex items-center justify-between">
+    <div className="space-y-4">
+
+      {/* ── Header ───────────────────────────────────────────────────────── */}
+      <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-xl font-semibold text-zinc-100">Response Actions</h1>
-          {data && (
-            <p className="mt-0.5 text-sm text-zinc-500">
-              {allItems.length} loaded{hasFilters && " (filtered)"}
-            </p>
-          )}
+          <h1 className="font-case text-2xl font-bold uppercase tracking-wider text-dossier-ink">
+            Response Actions
+          </h1>
+          <p className="mt-0.5 font-mono text-xs text-dossier-ink/30">
+            {data
+              ? `${allItems.length} action${allItems.length !== 1 ? "s" : ""}${hasFilters ? " · filtered" : ""}`
+              : "Loading…"}
+          </p>
         </div>
-        <p className="text-xs text-zinc-600">
+        <p className="font-mono text-[11px] text-dossier-ink/25 text-right max-w-[220px] leading-relaxed hidden sm:block">
           To run or undo actions, open an incident and use the Response tab.
         </p>
       </div>
 
-      {/* Filters */}
-      <div className="mb-6 flex flex-wrap items-center gap-3">
-        {/* Status */}
-        <div className="flex items-center gap-1">
-          <span className="text-xs text-zinc-500">Status:</span>
-          <div className="flex flex-wrap gap-1">
-            {STATUS_OPTIONS.map((s) => (
-              <button
-                key={s || "all"}
-                onClick={() => setStatusFilter(s as ActionStatus | "")}
-                className={`rounded-full border px-2.5 py-0.5 text-xs capitalize transition-colors ${
-                  statusFilter === s
-                    ? "border-indigo-700 bg-indigo-950 text-indigo-300"
-                    : "border-zinc-700 bg-zinc-900 text-zinc-400 hover:border-zinc-600 hover:text-zinc-300"
-                }`}
-              >
-                {s || "any"}
-              </button>
-            ))}
-          </div>
+      {/* ── Filters ──────────────────────────────────────────────────────── */}
+      <div className="space-y-2">
+        {/* Row 1: status + class */}
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="font-mono text-[11px] uppercase tracking-widest text-dossier-ink/25 mr-1">status</span>
+          {STATUS_OPTIONS.map((s) => (
+            <Chip
+              key={s || "all"}
+              label={s || "any"}
+              active={statusFilter === s}
+              onClick={() => setStatusFilter(s as ActionStatus | "")}
+            />
+          ))}
+          <div className="w-px h-4 bg-dossier-paperEdge mx-2" />
+          <span className="font-mono text-[11px] uppercase tracking-widest text-dossier-ink/25 mr-1">class</span>
+          {CLASSIFICATION_OPTIONS.map((c) => (
+            <Chip
+              key={c || "all"}
+              label={c ? c.replace("_", " ") : "any"}
+              active={classFilter === c}
+              onClick={() => setClassFilter(c as ActionClassification | "")}
+            />
+          ))}
         </div>
 
-        {/* Classification */}
-        <div className="flex items-center gap-1">
-          <span className="text-xs text-zinc-500">Class:</span>
-          <div className="flex flex-wrap gap-1">
-            {CLASSIFICATION_OPTIONS.map((c) => (
-              <button
-                key={c || "all"}
-                onClick={() => setClassFilter(c as ActionClassification | "")}
-                className={`rounded-full border px-2.5 py-0.5 text-xs transition-colors ${
-                  classFilter === c
-                    ? "border-indigo-700 bg-indigo-950 text-indigo-300"
-                    : "border-zinc-700 bg-zinc-900 text-zinc-400 hover:border-zinc-600 hover:text-zinc-300"
-                }`}
-              >
-                {c || "any"}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Kind */}
-        <div className="flex items-center gap-1">
-          <span className="text-xs text-zinc-500">Kind:</span>
+        {/* Row 2: since + kind */}
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="font-mono text-[11px] uppercase tracking-widest text-dossier-ink/25 mr-1">since</span>
+          {(Object.keys(SINCE_LABELS) as SinceKey[]).map((k) => (
+            <Chip
+              key={k}
+              label={SINCE_LABELS[k]}
+              active={sinceKey === k}
+              onClick={() => setSinceKey(k)}
+            />
+          ))}
+          <div className="w-px h-4 bg-dossier-paperEdge mx-2" />
+          <span className="font-mono text-[11px] uppercase tracking-widest text-dossier-ink/25 mr-1">kind</span>
           <select
             value={kindFilter}
             onChange={(e) => setKindFilter(e.target.value as ActionKind | "")}
-            className="rounded border border-zinc-700 bg-zinc-900 px-2 py-0.5 text-xs text-zinc-300 focus:border-indigo-600 focus:outline-none"
+            className="border border-dossier-paperEdge bg-dossier-stamp px-3 py-1 font-mono text-xs text-dossier-ink/60 outline-none focus:border-dossier-evidenceTape/40 transition-colors"
           >
             <option value="">any</option>
             {ACTION_KINDS.map((k) => (
-              <option key={k} value={k}>
-                {k}
-              </option>
+              <option key={k} value={k}>{k}</option>
             ))}
           </select>
+          {hasFilters && (
+            <button
+              onClick={clearFilters}
+              className="ml-auto font-mono text-[11px] uppercase tracking-widest text-dossier-redaction/40 hover:text-dossier-redaction transition-colors"
+            >
+              × clear
+            </button>
+          )}
         </div>
-
-        {/* Since */}
-        <div className="flex items-center gap-1">
-          <span className="text-xs text-zinc-500">Since:</span>
-          <select
-            value={sinceKey}
-            onChange={(e) => setSinceKey(e.target.value as SinceKey)}
-            className="rounded border border-zinc-700 bg-zinc-900 px-2 py-0.5 text-xs text-zinc-300 focus:border-indigo-600 focus:outline-none"
-          >
-            {(Object.keys(SINCE_LABELS) as SinceKey[]).map((k) => (
-              <option key={k} value={k}>
-                {SINCE_LABELS[k]}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {hasFilters && (
-          <button
-            onClick={clearFilters}
-            className="ml-auto text-xs text-zinc-500 hover:text-zinc-300 underline underline-offset-2 transition-colors"
-          >
-            Clear filters
-          </button>
-        )}
       </div>
 
-      {/* Error */}
-      {error && !data && (
-        <div className="mb-6">
-          <ErrorState error={error} onRetry={refetch} />
-        </div>
-      )}
+      {/* ── Errors ───────────────────────────────────────────────────────── */}
+      {error && !data && <ErrorState error={error} onRetry={refetch} />}
       {error && data && (
-        <div className="mb-4 flex items-center gap-2 rounded border border-amber-900 bg-amber-950/30 px-3 py-2 text-xs text-amber-400">
-          <span className="font-bold">!</span>
-          <span>Last refresh failed — {error.message}. Showing cached data.</span>
-          <button onClick={refetch} className="ml-auto underline hover:text-amber-300">
-            Retry
-          </button>
+        <div className="flex items-center gap-2 border border-cyber-orange/20 bg-cyber-orange/5 px-3 py-2 font-mono text-xs text-cyber-orange">
+          <span>⚠ Last refresh failed — {error.message}</span>
+          <button onClick={refetch} className="ml-auto underline hover:text-dossier-evidenceTape">Retry</button>
         </div>
       )}
 
-      {/* Content */}
+      {/* ── Content ──────────────────────────────────────────────────────── */}
       {loading ? (
-        <div className="flex flex-col gap-2">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <SkeletonCard key={i} />
-          ))}
+        <div className="space-y-1.5">
+          {Array.from({ length: 5 }).map((_, i) => <SkeletonCard key={i} />)}
         </div>
       ) : allItems.length === 0 ? (
         <EmptyState
@@ -327,7 +267,7 @@ export default function ActionsPage() {
             hasFilters ? (
               <button
                 onClick={clearFilters}
-                className="text-xs text-indigo-400 hover:text-indigo-300 underline"
+                className="font-case text-xs uppercase tracking-widest text-dossier-evidenceTape underline underline-offset-2 hover:text-dossier-ink transition-colors"
               >
                 Clear filters
               </button>
@@ -335,7 +275,11 @@ export default function ActionsPage() {
           }
         />
       ) : (
-        <ActionTable items={allItems} />
+        <div className="space-y-1">
+          {allItems.map((a) => (
+            <ActionRow key={a.id} action={a} />
+          ))}
+        </div>
       )}
     </div>
   )
