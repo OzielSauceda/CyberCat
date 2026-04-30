@@ -112,6 +112,26 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Surface failure detail as annotations
+        if: failure()
+        working-directory: agent
+        run: |
+          # Workflow ::error:: annotations are publicly visible via the
+          # check-runs annotations API. Stuff the failure context into
+          # one annotation per line so we can read it without log access.
+          if [ ! -f pytest-agent.log ]; then
+            echo "::error::no pytest log produced"
+            exit 0
+          fi
+          # Lines covering FAILED / ERROR / Traceback / assertion / final summary.
+          grep -nE "^(FAILED|ERROR|E   |>   |_+ .+ _+|tests/.+::|=+ short test summary|=+ [0-9]+ (failed|passed|error))" pytest-agent.log \
+            | tail -80 \
+            | while IFS= read -r line; do
+                # Strip control chars and colons that confuse the workflow command parser.
+                clean=$(printf '%s' "$line" | tr -d '\r' | sed 's/%/%25/g; s/\r/%0D/g; s/\n/%0A/g')
+                echo "::error::$clean"
+              done
+
   frontend:
     name: frontend (typecheck + build)
     runs-on: ubuntu-latest
