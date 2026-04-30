@@ -26,6 +26,8 @@ What Phase 19 did is **make the existing thing more trustworthy**, in four lanes
 
 That's the whole story. **No layer was added, no service was swapped, no schema was rewritten.** The custom-built / integrated split (per `CLAUDE.md` §6) is exactly what it was — Wazuh is still optional telemetry, the cct-agent is still the default, the canonical event/incident model is unchanged.
 
+> **One honest caveat:** the four lanes above describe what Phase 19 *coded*. Several of those bullets were **never live-verified to the bar the plan committed to** during the merge cycle — Redis kill on Linux, live Postgres restart re-verification, load harness at 1000/s. The code is in `main`, but the acceptance bars from `docs/phase-19-plan.md` § "Verification plan" still have open items. See § 4 below for the seven concrete steps to actually close the phase.
+
 ---
 
 ## 2. Did the core architecture change?
@@ -84,13 +86,27 @@ If you `git log --stat` the Phase 19 commit (`f68232d`), about half the diff is 
 
 ## 4. Where are we now and what's the next step?
 
-**Status:** Phase 19 is merged to `main`. Backend, agent, and frontend CI all gate every push. The smoke chain runs on push-to-main and ran clean on the PR-trigger validation. The smoke fix that closes the structural bug from the original Phase 19 ship is sitting open as PR #6, all checks green, ready to merge.
+**Status (honest revision):** Phase 19 is **code-shipped to `main`, acceptance pending.** Backend, agent, and frontend CI all gate every push. The smoke chain runs on push-to-main and ran clean on the PR-trigger validation. The smoke fix that closes the structural bug from the original Phase 19 ship is sitting open as PR #6, all checks green, ready to merge.
 
-**Next concrete step (in order):**
+**But Phase 19 is not formally complete by its own done-criteria.** The plan at `docs/phase-19-plan.md` line 351 + §"Verification plan" (lines 319–331) call for live acceptance on three items that were never closed during the merge cycle:
+
+- **Plan §A1 acceptance (line 67):** `docker compose kill redis` mid-`credential_theft_chain --speed 0.1` — must pass with no traceback. Failed on Windows/WSL2; never re-run on Linux.
+- **Plan §A3 + Gap 2 (line 405):** live `100/s × 30s` against `/v1/events/raw` with `restart postgres` at t=10s — must hit ≥ 95% acceptance + 30s recovery. Unit test for the fix passes; the live retest was never re-run.
+- **Plan §A6 (line 125):** load harness at **1000/s × 60s** — must hit 0% drops + p95 < 500ms + peak Postgres conns < 25. The heavy-hitting trail only ran 100/s.
+
+Plus one numerical delta: §A7 targeted ≤ 4 queries on a 50-item page; we shipped at ≤ 12 / ≤ 10 (still a 95%+ reduction from the 250+ baseline, but not the planned floor). And the `v0.9` tag is not cut.
+
+**Next concrete steps — pick up here in this order:**
 
 1. Merge PR #6 (`fix/smoke-workflow-agent-profile`) → `main`. URL: https://github.com/OzielSauceda/CyberCat/pull/6
 2. After merge, the Smoke workflow fires on `main`. Watch it. Expect green. If it fails, the per-script `::error::` annotations (visible in the public check-runs annotations API even without auth) and the `smoke-logs` artifact will tell you which script and why.
-3. Tag `v0.9` against the merge commit. The only outstanding caveat is the `redis-kill` chaos test still surfacing `httpx.ReadTimeout` on **Windows/WSL2 + Docker Desktop only** — diagnosed as a platform-level getaddrinfo NXDOMAIN issue, not a backend bug. The full diagnostic and recommended next steps are in `docs/phase-19-handoff.md` § "A1.1 residual gap". If you want the v0.9 tag to be Linux-clean, re-run the chaos commands from that handoff's "How to verify the fixes worked" section against a Linux host first.
+3. **Re-run Redis kill-test on Linux.** Reproduction recipe in `docs/phase-19-handoff.md` § "How to verify the fixes worked" (Test 3). Easiest paths: an Ubuntu Docker container, or a temporary `workflow_dispatch` GH Actions workflow against a Linux runner. If it passes, the §A1 acceptance bar is met. If it fails on Linux too, the deferred work in the handoff's "A1.1 residual gap" needs to land first.
+4. **Re-run live Postgres restart-test.** Recipe in the same handoff section (Test 4). Pass: ≥ 95% accepted, recovery within 30s, transport_errors well below 1992 (the pre-fix number).
+5. **Run load harness at 1000/s.** `python labs/perf/load_harness.py --rate 1000 --duration 60`. Pass: 0% drops, p95 < 500ms, peak Postgres conns < 25.
+6. **Reconcile hot-route ≤ 4 vs achieved ≤ 12.** Either tighten the routes further (one CTE per route should get to ≤ 4) or write a one-line amendment to the plan justifying the ≤ 12 / ≤ 10 floor and update the done-criteria text. Either is defensible; both close the gap honestly.
+7. **Tag `v0.9`** against the merge commit — only after 1–6 above.
+
+The single source of truth for this list is the top-of-file header in `PROJECT_STATE.md` ("What's pending — pick up here in this order"). This file and `docs/phase-19-handoff.md` § "Remaining work" mirror it verbatim.
 
 **Beyond v0.9:** Phase 19.5 (chaos testing) is the next phase per the roadmap — it systematizes the kind of failure injection we did manually here. After that, Phase 20 layers in heavy-hitter choreographed scenarios. See `PROJECT_STATE.md` § "Future / optional phases" for the full roadmap and `docs/roadmap-discussion-2026-04-30.md` for the long-form discussion.
 

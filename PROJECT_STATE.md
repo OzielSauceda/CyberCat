@@ -2,18 +2,51 @@
 
 Living status document. Update as reality changes. Short, current, honest.
 
-Last updated: 2026-04-30 (late evening) — **Phase 19 ✅ SHIPPED to `main`.** PR #5 merged (`phase-19` → `main`, commit `efde988`). All three CI jobs (backend, agent, frontend) green; smoke chain (Linux runner) green after the follow-up smoke fix in PR #6 (`fix/smoke-workflow-agent-profile`). PR #6 is **ready to merge** — once it lands, the Smoke workflow will gate every push to `main`. After that we're clear to tag **v0.9**.
+Last updated: 2026-04-30 (late evening, honest revision) — **Phase 19 code-shipped to `main`, acceptance pending.** Code for workstreams A1–A7 + B + C + D is in `main` via PR #5 (commit `efde988`); the smoke-workflow hotfix in PR #6 is open with all checks green. **However, Phase 19 is NOT complete by its own done-criteria** (`docs/phase-19-plan.md` line 351 + the §"Verification plan"). Earlier framing in this header overstated completion. Live acceptance has gaps in three of nine §"Verification plan" items, and the v0.9 tag is not cut.
 
-**The story of the day (post-merge):**
+**Honest scorecard against `docs/phase-19-plan.md`:**
+
+| Done-criteria clause | State |
+|---|---|
+| Code for A1–A7 + B + C + D implemented | ✅ shipped via PR #5 |
+| ≥ 200 backend tests green | ✅ 236/236 |
+| 122 agent tests green | ✅ on backend image (122); 104 on the CI agent runner (2 cross-image test files skipped) |
+| 0 frontend typecheck errors | ✅ |
+| **Simulator survives `docker compose kill redis` mid-run** | ❌ Failed on Windows/WSL2; diagnosed as platform getaddrinfo NXDOMAIN; **never re-run on Linux** |
+| CI gates every push | ✅ |
+| **Nightly smoke runs against `main`** | ⚠️ Workflow wired (cron `0 6 * * *`) but most recent smoke on `main` is **RED** until PR #6 merges |
+| **Release tag `v0.9` cut** | ❌ |
+
+**Honest scorecard against §"Verification plan" (lines 319–331):**
+
+| # | Item | State |
+|---|---|---|
+| 1 | Resilience pytest | ✅ 236/236 |
+| 2 | Manual Redis kill-test (live) | ❌ Failed on Windows; never tested on Linux |
+| 3 | Manual Postgres restart-test (live) | ⚠️ A3.1 unit test passes, but the live `100/s × 30s + restart postgres at t=10s` retest with ≥ 95% acceptance was **never re-run** after the fix |
+| 4 | Load test 1000/s × 60s | ❌ Heavy-hitting only ran **100/s × 60s** — one order of magnitude below §A6 (line 125) |
+| 5 | Hot-route ≤ 4 queries on 50-item page | ⚠️ Achieved ≤ 12 / ≤ 10 — better than baseline (250+ / 200+) but the plan target was ≤ 4 |
+| 6 | Detection-as-code | ✅ |
+| 7 | CI proof | ✅ |
+| 8 | Smoke proof | ❌ Smoke on `main` is currently red (waiting on PR #6) |
+| 9 | Frontend typecheck | ✅ |
+
+## What's pending — pick up here in this order
+
+1. **Merge PR #6** (`fix/smoke-workflow-agent-profile`). All 6 checks green. Closes verification-plan items #7 and #8.
+2. **Watch Smoke run green on `main`** after merge. Same workflow that just passed on the PR trigger; should be green.
+3. **Re-run the Redis kill-test (live) on Linux.** Plan §A1 acceptance (line 67): `docker compose kill redis` mid-`credential_theft_chain --speed 0.1`. The full reproduction recipe is in `docs/phase-19-handoff.md` § "How to verify the fixes worked" (Test 3). Easiest path: run the chaos commands inside a Linux container (`docker run --rm -v "$PWD:/work" ubuntu:24.04 ...`) or via a temporary `workflow_dispatch` GH Actions workflow against a Linux runner. **Pass criterion:** simulator's `--verify` PASSES, latency on each request < 1s, no traceback. **Failure path:** the deferred work in the handoff's "A1.1 residual gap" lands first.
+4. **Re-run the Postgres restart-test (live).** Plan §A3 + Gap 2 (line 405): `100/s × 30s` against `/v1/events/raw` with `docker compose restart postgres` at t=10s. **Pass criterion:** ≥ 95% accepted, recovery within 30s, transport_errors well below 1992 (the pre-fix number).
+5. **Run the load harness at the §A6 acceptance level.** Plan §A6 (line 125): `python labs/perf/load_harness.py --rate 1000 --duration 60` (the heavy-hitting trail only ran 100/s — that's not the bar the plan committed to). **Pass criterion:** 0% drops at the API layer, p95 detection latency < 500ms, peak Postgres connection count < 25.
+6. **Reconcile hot-route query count.** Plan §A7 (line 138) targeted ≤ 4 queries on a 50-item page; we shipped at ≤ 12 (incidents) / ≤ 10 (detections). Two honest options: (a) tighten the routes further by collapsing the entity-count + event-count + detection-count loads into one CTE and confirming ≤ 4, or (b) write a one-line amendment to the plan justifying the ≤ 12 / ≤ 10 floor (e.g., separate batched queries are clearer than a CTE for future maintainers; the meaningful win is N → constant, not constant → 4) and update the done-criteria text to match. Either is defensible; both close the gap honestly.
+7. **Tag `v0.9`** — only after 1–6 above. Skipping any of them is shipping with a debt the plan explicitly forbade.
+
+The story of the day (workflow plumbing, no product changes — preserved from the pre-revision header):
+
 - The Smoke workflow shipped in Phase 19 was push-to-main only, so it never ran during the PR cycle. Its first real run failed because (a) it brought up only `postgres redis backend frontend` instead of the full `--profile agent` stack — three smoke scripts need `cct-agent` + `lab-debian` — and (b) the agent needs `CCT_AGENT_TOKEN` provisioned by `start.sh`, which the workflow wasn't using.
 - Hotfix branch `fix/smoke-workflow-agent-profile` (PR #6) replaces the bare `docker compose up` with `bash start.sh` (defaults to `--profile agent` and bootstraps the token), installs `httpx` on the runner (host-side simulator dep), pins `pytest` ordering on the merge gate (`-p no:randomly`) so the seed-shuffle flake we hit twice goes away, and adds a narrow `pull_request` trigger to `smoke.yml` so workflow/compose changes self-validate before merge instead of blowing up post-merge.
 - Earlier same-day on the Phase 19 PR: agent CI was failing because `*.log` in `.gitignore` (under `# Docker`) was eating five test fixture files in `agent/tests/fixtures/` — they existed locally so my pytest passed but the GH Actions checkout had no fixtures. Fixed via a `!agent/tests/fixtures/*.log` negation + force-tracking the five files.
 - **The product code did not change today.** Everything above is workflow / .gitignore / annotation-surfacer plumbing on top of Phase 19's already-merged backend + agent + docs work. No architectural shift. See `docs/phase-19-summary.md` for the plain-language version of "what Phase 19 actually changed."
-
-**What's pending (pick up here):**
-1. Merge PR #6 (`fix/smoke-workflow-agent-profile`) — all checks green, mergeable.
-2. After merge, watch the Smoke workflow run on `main`. Expect green (we just verified the same workflow on the PR trigger).
-3. Tag `v0.9` against the merge commit. The only known caveat is the `redis-kill` chaos test still surfacing `httpx.ReadTimeout` on **Windows/WSL2 + Docker Desktop only** — diagnosed as a getaddrinfo NXDOMAIN platform issue, not a backend bug. Documented in `docs/phase-19-handoff.md` § "A1.1 residual gap".
 
 ---
 
@@ -34,7 +67,7 @@ Last updated: 2026-04-29 — **Phase 17 ✅ FULLY SHIPPED (incl. 17.8 docs/ADR/s
 
 ## Status summary
 
-**Phase:** Phase 19 ✅ SHIPPED 2026-04-30 (merged to main via PR #5; smoke-fix PR #6 ready to merge). Phase 18 ✅ SHIPPED 2026-04-29 (PR #3). Phase 17 ✅ FULLY SHIPPED 2026-04-29 (17.1–17.7 code-complete prior, 17.8 docs/ADR/smoke). Phase 16.10 ✅ FULLY VERIFIED 2026-04-28. Phase 16.9 ✅ FULLY VERIFIED. Phase 16 ✅ FULLY VERIFIED. Phase 15 ✅ FULLY VERIFIED.
+**Phase:** Phase 19 🟡 CODE-SHIPPED, ACCEPTANCE PENDING 2026-04-30 (merged to main via PR #5, smoke-fix PR #6 ready; 3 of 9 verification-plan items still open + v0.9 tag not cut — see top-of-file pickup list). Phase 18 ✅ SHIPPED 2026-04-29 (PR #3). Phase 17 ✅ FULLY SHIPPED 2026-04-29 (17.1–17.7 code-complete prior, 17.8 docs/ADR/smoke). Phase 16.10 ✅ FULLY VERIFIED 2026-04-28. Phase 16.9 ✅ FULLY VERIFIED. Phase 16 ✅ FULLY VERIFIED. Phase 15 ✅ FULLY VERIFIED.
 
 **Overall posture (honest):**
 
@@ -50,15 +83,17 @@ Last updated: 2026-04-29 — **Phase 17 ✅ FULLY SHIPPED (incl. 17.8 docs/ADR/s
 
 ## What needs to happen next session (pick up here)
 
-**Phase 19 ✅ shipped 2026-04-30 (PR #5 → `main`).** Phases 17 and 18 also fully shipped earlier. No outstanding items on the product track.
+**Phase 19 is code-shipped to `main` but not formally complete.** Phases 17 and 18 are fully shipped. The Phase 19 plan's own done-criteria (`docs/phase-19-plan.md` line 351) and §"Verification plan" (lines 319–331) call out three live-acceptance items + one numerical target + the v0.9 tag that were not closed during the merge cycle. The single source of truth for what's left is the top-of-file header above ("What's pending — pick up here in this order"). For convenience, the same seven items, in the same order:
 
-**Three concrete pickup steps:**
+1. **Merge PR #6** (`fix/smoke-workflow-agent-profile`). All 6 checks green. Closes verification-plan items #7 (CI proof) and #8 (smoke proof on `main`).
+2. **Watch Smoke run green on `main`** after merge.
+3. **Re-run Redis kill-test (live) on Linux.** Plan §A1 acceptance bar; reproduction recipe in `docs/phase-19-handoff.md` § "How to verify the fixes worked" (Test 3). Required to close verification-plan item #2.
+4. **Re-run Postgres restart-test (live).** `100/s × 30s` against `/v1/events/raw` with `restart postgres` at t=10s; ≥ 95% accepted, recovery within 30s. Required to close verification-plan item #3.
+5. **Run load harness at the §A6 bar** — `python labs/perf/load_harness.py --rate 1000 --duration 60` (the heavy-hitting trail only ran 100/s). 0% drops, p95 < 500ms, peak Postgres connections < 25. Required to close verification-plan item #4.
+6. **Reconcile hot-route query count.** Plan §A7 targeted ≤ 4 queries on a 50-item page; we shipped at ≤ 12 / ≤ 10. Either tighten with a CTE refactor or write a one-line plan amendment justifying the floor and update done-criteria text. Required to close verification-plan item #5.
+7. **Tag `v0.9`** against the merge commit — only after 1–6 above. Skipping any is shipping with debt the plan explicitly forbade.
 
-1. **Merge PR #6** (`fix/smoke-workflow-agent-profile`). All 6 checks green (CI push + PR × 3 jobs, Smoke PR run). Fixes the Smoke workflow that shipped broken in Phase 19 (it was push-to-main only, so it never ran during the PR cycle and we discovered it at merge time).
-2. **Watch Smoke run on `main` after merge.** Same workflow that just passed on the PR — should also pass on `main`. If it doesn't, the smoke-logs artifact + per-script `::error::` annotations are wired up to surface the failing script and its tail without needing job-log auth.
-3. **Tag `v0.9`** against the merge commit. The only outstanding caveat is the redis-kill chaos test surfacing `httpx.ReadTimeout` on Windows/WSL2 + Docker Desktop only — diagnosed as a platform-level getaddrinfo NXDOMAIN issue, not a backend bug. If you want the v0.9 tag to be Linux-clean, re-run the chaos commands from `docs/phase-19-handoff.md` § "How to verify the fixes worked" against a Linux host (or a temporary `workflow_dispatch` invocation that runs them). If they pass, ship v0.9. If they don't, the deferred work in the handoff doc § "A1.1 residual gap" needs to land first.
-
-After v0.9, the next phase per the roadmap is **Phase 19.5 (chaos testing)** — a separate half-phase that systematizes the kind of failure injection we did manually. Plan: `docs/roadmap-discussion-2026-04-30.md` (also referenced from `docs/phase-19-plan.md`).
+After Phase 19 closes, the next phase per the roadmap is **Phase 19.5 (chaos testing)** — a separate half-phase that systematizes the kind of failure injection we did manually. Plan: `docs/roadmap-discussion-2026-04-30.md` (also referenced from `docs/phase-19-plan.md`).
 
 **Verified 2026-04-29:**
 - **Phase 17 spot-fix aesthetic pass — RESOLVED.** Verification of the surfaces called out in this section (NavBar, HelpMenu, CaseBoard, badge components in layout, welcome `page.tsx`) confirmed they are now fully on dossier tokens (`bg-dossier-stamp`, `border-dossier-paperEdge`, `text-dossier-ink`, `dossier-evidenceTape`); no `bg-zinc-900/50` fallback remains. Most likely repainted during Phase 18.8 work after `frontend-design` was invoked. Other files in the tree still reference zinc (login page, Skeleton, ConfidenceBar, some incident-detail panels) but those are not the Phase 17.2/17.3 surfaces this note was about.
@@ -79,13 +114,15 @@ After v0.9, the next phase per the roadmap is **Phase 19.5 (chaos testing)** —
 
 ## Phase-by-phase state
 
-### Phase 19 — ✅ SHIPPED 2026-04-30 — Hardening, CI/CD, Detection-as-Code
+### Phase 19 — 🟡 CODE-SHIPPED 2026-04-30, ACCEPTANCE PENDING — Hardening, CI/CD, Detection-as-Code
 
 **Plan:** `docs/phase-19-plan.md`
 **Handoff:** `docs/phase-19-handoff.md`
 **Plain-language summary:** `docs/phase-19-summary.md`
 **Merged via:** PR #5 (`phase-19` → `main`, commit `efde988`).
 **Follow-up smoke fix:** PR #6 (`fix/smoke-workflow-agent-profile`) — open, all checks green, ready to merge.
+
+> **Honest status (revised):** earlier framing in this entry called Phase 19 "shipped" — that was overstated. The code is in `main`, the test posture is green, but the §"Verification plan" in `docs/phase-19-plan.md` has three items that were never closed (live Redis-kill on Linux, live Postgres restart re-verification, 1000/s load test) plus one numerical delta vs target (hot-route query count ≤ 12 actual vs ≤ 4 planned). v0.9 tag is not cut. The seven concrete pickup steps to actually close the phase live in the top-of-file header above ("What's pending — pick up here in this order").
 
 **What Phase 19 does (one line):** It doesn't add new product features — it hardens what already exists, puts a continuous-integration gate in front of the repo, and adds a regression harness for detector behavior. After Phase 19, every push to a branch runs lint + tests across backend + agent + frontend; every push to `main` runs the smoke chain end-to-end; and every detector has a curated input fixture asserting it still fires.
 
