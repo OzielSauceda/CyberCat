@@ -37,7 +37,10 @@ jobs:
           # phase16_9 / phase16_10 / agent smoke scripts all require the
           # cct-agent + lab-debian containers, so the smoke chain must use
           # the agent profile (not the bare default-profile up).
-          ./start.sh
+          # Invoke via 'bash' explicitly — start.sh is tracked as mode
+          # 100644 (the repo lives on Windows, where git doesn't preserve
+          # executable bits), so a bare ./start.sh would die with exit 126.
+          bash start.sh
           # Give the backend a generous window to finish first-boot
           # migrations + auto-seed before any smoke script runs.
           for i in $(seq 1 60); do
