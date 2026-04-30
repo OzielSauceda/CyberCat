@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import redis.asyncio as aioredis
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -51,7 +51,7 @@ async def ingest_normalized_event(
                 incident_touched=None,
             )
 
-    pipeline_start = datetime.now(timezone.utc)
+    pipeline_start = datetime.now(UTC)
 
     event = Event(
         id=uuid.uuid4(),
@@ -79,7 +79,7 @@ async def ingest_normalized_event(
             # Emit incident event — created if born in this pipeline call, updated if extended
             inc_opened_at = inc.opened_at
             if inc_opened_at.tzinfo is None:
-                inc_opened_at = inc_opened_at.replace(tzinfo=timezone.utc)
+                inc_opened_at = inc_opened_at.replace(tzinfo=UTC)
             is_new_incident = inc_opened_at >= pipeline_start - timedelta(seconds=2)
             if is_new_incident:
                 await publish("incident.created", {

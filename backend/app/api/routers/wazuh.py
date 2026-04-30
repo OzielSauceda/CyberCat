@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter
 from pydantic import BaseModel
@@ -61,7 +61,7 @@ async def wazuh_status() -> WazuhStatus:
 
     last_poll_at, last_success_at, last_error, ingested, dropped = cursor
 
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     threshold = settings.wazuh_poll_interval_seconds * 3
     reachable = (
         last_error is None

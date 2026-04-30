@@ -1,4 +1,3 @@
-from typing import Optional
 
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -23,10 +22,10 @@ class Settings(BaseSettings):
     auth_session_ttl_minutes: int = 480
 
     # OIDC opt-in (Phase 14.4 — all None until configured)
-    oidc_provider_url: Optional[str] = None
-    oidc_client_id: Optional[str] = None
-    oidc_client_secret: Optional[str] = None
-    oidc_redirect_uri: Optional[str] = None
+    oidc_provider_url: str | None = None
+    oidc_client_id: str | None = None
+    oidc_client_secret: str | None = None
+    oidc_redirect_uri: str | None = None
 
     @model_validator(mode="after")
     def _validate_auth_cookie_secret(self) -> "Settings":

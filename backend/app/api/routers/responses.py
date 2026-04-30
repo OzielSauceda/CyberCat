@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -16,7 +16,13 @@ from app.auth.models import User
 from app.db.models import Action, ActionLog
 from app.db.session import get_db
 from app.enums import ActionClassification, ActionKind, ActionProposedBy, ActionStatus
-from app.response.executor import ActionStateError, OutOfLabScopeError, execute_action, propose_action, revert_action
+from app.response.executor import (
+    ActionStateError,
+    OutOfLabScopeError,
+    execute_action,
+    propose_action,
+    revert_action,
+)
 from app.streaming.publisher import publish
 
 router = APIRouter(prefix="/responses", tags=["responses"])
@@ -85,7 +91,7 @@ async def list_responses(
         since_normalized = since.replace("Z", "+00:00")
         since_dt = datetime.fromisoformat(since_normalized)
         if since_dt.tzinfo is None:
-            since_dt = since_dt.replace(tzinfo=timezone.utc)
+            since_dt = since_dt.replace(tzinfo=UTC)
         q = q.where(Action.proposed_at >= since_dt)
     q = q.limit(limit + 1)
 

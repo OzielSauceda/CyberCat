@@ -53,7 +53,7 @@ async def test_consumer_forwards_pmessage_to_all_queues():
     fake_pubsub.listen = fake_listen
     bus._pubsub = fake_pubsub
 
-    task = asyncio.create_task(bus._consume())
+    task = asyncio.create_task(bus._consume_once())
     await asyncio.sleep(0.05)
     task.cancel()
     try:
@@ -87,7 +87,7 @@ async def test_unregister_stops_delivery():
     fake_pubsub.listen = fake_listen
     bus._pubsub = fake_pubsub
 
-    task = asyncio.create_task(bus._consume())
+    task = asyncio.create_task(bus._consume_once())
     await asyncio.sleep(0.05)
     task.cancel()
     try:

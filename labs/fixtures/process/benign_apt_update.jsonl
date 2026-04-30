@@ -1,0 +1,1 @@
+{"_t_offset_sec": 30, "source": "direct", "kind": "process.created", "raw": {}, "normalized": {"host": "lab-debian", "user": "root", "pid": 1234, "ppid": 1, "image": "/usr/bin/apt", "cmdline": "apt update"}, "dedupe_key": "fixture:proc:benign:apt:1"}

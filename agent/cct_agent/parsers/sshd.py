@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 
 @dataclass(frozen=True)
@@ -175,16 +175,16 @@ def _parse_ts(
         except ValueError:
             return None
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return dt.astimezone(timezone.utc)
+            dt = dt.replace(tzinfo=UTC)
+        return dt.astimezone(UTC)
 
     if bsd_ts is not None:
-        year = year_hint if year_hint is not None else datetime.now(timezone.utc).year
+        year = year_hint if year_hint is not None else datetime.now(UTC).year
         try:
             # "Apr  3 ..." (single-digit day) has two spaces; strptime handles both.
             dt = datetime.strptime(f"{year} {bsd_ts}", "%Y %b %d %H:%M:%S")
         except ValueError:
             return None
-        return dt.replace(tzinfo=timezone.utc)
+        return dt.replace(tzinfo=UTC)
 
     return None

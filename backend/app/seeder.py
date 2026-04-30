@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import redis.asyncio as aioredis
 from sqlalchemy import text
@@ -95,7 +95,7 @@ async def _run_seed(db: AsyncSession, redis: aioredis.Redis) -> None:
     _ATTACKER_IP = "203.0.113.42"
     _WORKSTATION_IP = "10.0.0.50"
 
-    base = datetime.now(timezone.utc) - timedelta(minutes=10)
+    base = datetime.now(UTC) - timedelta(minutes=10)
 
     # Stage 0: lab assets
     await _register_asset(db, LabAssetKind.user, _USER)

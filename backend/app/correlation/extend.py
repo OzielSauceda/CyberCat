@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -88,5 +88,5 @@ async def extend_incident(
             ))
 
     # Bump updated_at
-    incident.updated_at = datetime.now(timezone.utc)
+    incident.updated_at = datetime.now(UTC)
     await db.flush()

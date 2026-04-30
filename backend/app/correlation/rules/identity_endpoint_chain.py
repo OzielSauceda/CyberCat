@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import redis.asyncio as aioredis
@@ -87,7 +87,7 @@ async def identity_endpoint_chain(
         return None
 
     # Find an open identity_compromise incident for this user within the lookback window.
-    window_start = datetime.now(timezone.utc) - timedelta(minutes=_LOOKBACK_MINUTES)
+    window_start = datetime.now(UTC) - timedelta(minutes=_LOOKBACK_MINUTES)
 
     inc_result = await db.execute(
         select(Incident)

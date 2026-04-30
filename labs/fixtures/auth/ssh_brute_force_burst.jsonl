@@ -1,0 +1,5 @@
+{"_t_offset_sec": 50, "source": "direct", "kind": "auth.failed", "raw": {"src_user": "alice"}, "normalized": {"user": "alice", "source_ip": "203.0.113.50", "auth_type": "password"}, "dedupe_key": "fixture:auth:burst:1"}
+{"_t_offset_sec": 40, "source": "direct", "kind": "auth.failed", "raw": {"src_user": "alice"}, "normalized": {"user": "alice", "source_ip": "203.0.113.50", "auth_type": "password"}, "dedupe_key": "fixture:auth:burst:2"}
+{"_t_offset_sec": 30, "source": "direct", "kind": "auth.failed", "raw": {"src_user": "alice"}, "normalized": {"user": "alice", "source_ip": "203.0.113.50", "auth_type": "password"}, "dedupe_key": "fixture:auth:burst:3"}
+{"_t_offset_sec": 20, "source": "direct", "kind": "auth.failed", "raw": {"src_user": "alice"}, "normalized": {"user": "alice", "source_ip": "203.0.113.50", "auth_type": "password"}, "dedupe_key": "fixture:auth:burst:4"}
+{"_t_offset_sec": 10, "source": "direct", "kind": "auth.failed", "raw": {"src_user": "alice"}, "normalized": {"user": "alice", "source_ip": "203.0.113.50", "auth_type": "password"}, "dedupe_key": "fixture:auth:burst:5"}

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,7 +21,7 @@ async def execute(action: Action, db: AsyncSession) -> tuple[ActionResult, str |
         return ActionResult.fail, "incident not found", None
     prior = inc.severity.value
     inc.severity = new_sev
-    inc.updated_at = datetime.now(timezone.utc)
+    inc.updated_at = datetime.now(UTC)
     return ActionResult.ok, None, {"prior_severity": prior}
 
 
@@ -33,5 +33,5 @@ async def revert(action: Action, log: ActionLog, db: AsyncSession) -> tuple[Acti
     if inc is None:
         return ActionResult.fail, "incident not found", None
     inc.severity = Severity(prior_raw)
-    inc.updated_at = datetime.now(timezone.utc)
+    inc.updated_at = datetime.now(UTC)
     return ActionResult.ok, None, None

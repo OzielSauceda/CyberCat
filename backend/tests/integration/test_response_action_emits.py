@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -21,12 +22,15 @@ from app.streaming.publisher import publish
 @pytest.mark.asyncio
 async def test_propose_action_emits_event(client, truncate_tables):
     """Proposing an action via REST emits an action.proposed event to the EventBus."""
-    # Seed events to create an incident via the ingest path
+    # Seed events to create an incident via the ingest path. Timestamps are
+    # generated relative to "now" so this test stays inside the Phase-19
+    # 30-day past-bound on RawEventIn.occurred_at.
+    base_time = datetime.now(timezone.utc) - timedelta(minutes=5)
     seed_events = [
         {
             "source": "direct",
             "kind": "auth.failed",
-            "occurred_at": "2026-01-01T10:00:00Z",
+            "occurred_at": base_time.isoformat(),
             "raw": {},
             "normalized": {"user": "alice", "source_ip": "1.2.3.4", "auth_type": "password"},
             "dedupe_key": "direct-af-propose-1",
@@ -34,7 +38,7 @@ async def test_propose_action_emits_event(client, truncate_tables):
         {
             "source": "direct",
             "kind": "auth.failed",
-            "occurred_at": "2026-01-01T10:01:00Z",
+            "occurred_at": (base_time + timedelta(minutes=1)).isoformat(),
             "raw": {},
             "normalized": {"user": "alice", "source_ip": "1.2.3.4", "auth_type": "password"},
             "dedupe_key": "direct-af-propose-2",
@@ -42,7 +46,7 @@ async def test_propose_action_emits_event(client, truncate_tables):
         {
             "source": "direct",
             "kind": "auth.succeeded",
-            "occurred_at": "2026-01-01T10:02:00Z",
+            "occurred_at": (base_time + timedelta(minutes=2)).isoformat(),
             "raw": {},
             "normalized": {"user": "alice", "source_ip": "1.2.3.4", "auth_type": "password"},
             "dedupe_key": "direct-as-propose-1",

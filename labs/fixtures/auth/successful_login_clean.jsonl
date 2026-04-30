@@ -1,0 +1,1 @@
+{"_t_offset_sec": 30, "source": "direct", "kind": "auth.succeeded", "raw": {"src_user": "alice"}, "normalized": {"user": "alice", "source_ip": "10.0.0.5", "auth_type": "password"}, "dedupe_key": "fixture:auth:clean:1"}

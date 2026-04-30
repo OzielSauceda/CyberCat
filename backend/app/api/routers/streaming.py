@@ -3,7 +3,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import Annotated, AsyncGenerator
+from collections.abc import AsyncGenerator
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -60,7 +61,7 @@ async def _generate(
         while True:
             try:
                 raw: str = await asyncio.wait_for(q.get(), timeout=_HB_INTERVAL)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 yield ": hb\n\n"
                 continue
 

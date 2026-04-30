@@ -101,6 +101,61 @@ async def readonly_client():
     app.dependency_overrides.pop(require_analyst, None)
 
 
+@pytest.fixture()
+def count_queries():
+    """Phase 19: count SQL statements executed against the engine inside a `with` block.
+
+    Usage::
+
+        async def test_no_n_plus_1(count_queries, ...):
+            with count_queries() as counter:
+                resp = await client.get("/v1/incidents")
+            assert counter.count <= 5
+    """
+    from contextlib import contextmanager
+
+    from sqlalchemy import event
+
+    from app.db.session import engine
+
+    class _Counter:
+        def __init__(self) -> None:
+            self.count = 0
+            self.statements: list[str] = []
+
+    @contextmanager
+    def _counter():
+        c = _Counter()
+
+        def _on_execute(_conn, _cursor, statement, *_args, **_kw):
+            # Skip BEGIN/COMMIT/ROLLBACK noise — we care about real SQL.
+            stripped = statement.strip().upper()
+            if stripped.startswith(("BEGIN", "COMMIT", "ROLLBACK", "SAVEPOINT", "RELEASE")):
+                return
+            c.count += 1
+            c.statements.append(statement)
+
+        sync_engine = engine.sync_engine
+        event.listen(sync_engine, "before_cursor_execute", _on_execute)
+        try:
+            yield c
+        finally:
+            event.remove(sync_engine, "before_cursor_execute", _on_execute)
+
+    return _counter
+
+
+@pytest.fixture(autouse=True)
+def _reset_redis_breaker():
+    """Reset the safe_redis circuit breaker before/after every test so timeouts
+    in one test cannot make safe_redis short-circuit in the next."""
+    from app.db.redis_state import reset_throttle
+
+    reset_throttle()
+    yield
+    reset_throttle()
+
+
 @pytest_asyncio.fixture(autouse=False)
 async def truncate_tables(client):
     """Truncate event/detection/incident tables AND flush Redis before a test that opts in.

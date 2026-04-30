@@ -295,7 +295,7 @@ async def _run(config: AgentConfig, stop_event: asyncio.Event) -> None:
                 pass
         try:
             await asyncio.wait_for(shipper_task, timeout=10.0)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             log.warning("shipper did not stop within 10s; cancelling")
             shipper_task.cancel()
             try:

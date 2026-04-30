@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.enums import EventSource
 
@@ -158,11 +158,10 @@ def _parse_ts(raw: object) -> datetime | None:
     if not raw:
         return None
     if isinstance(raw, datetime):
-        return raw if raw.tzinfo else raw.replace(tzinfo=timezone.utc)
+        return raw if raw.tzinfo else raw.replace(tzinfo=UTC)
     try:
-        from datetime import timezone as tz
         dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
-        return dt if dt.tzinfo else dt.replace(tzinfo=tz.utc)
+        return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
     except (ValueError, TypeError):
         return None
 

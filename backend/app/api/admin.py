@@ -6,16 +6,14 @@ DELETE /v1/admin/demo-data  — wipes every table touched by the seed scenario
 """
 from __future__ import annotations
 
+import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-import redis.asyncio as aioredis
-
-from app.auth.dependencies import require_admin, require_user
+from app.auth.dependencies import SystemUser, require_admin, require_user
 from app.auth.models import User
-from app.auth.dependencies import SystemUser
 from app.db.redis import get_redis
 from app.db.session import get_db
 from app.seeder import DEMO_REDIS_KEY

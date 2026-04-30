@@ -41,7 +41,7 @@ from __future__ import annotations
 import ipaddress
 import re
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Literal
 
 
@@ -171,9 +171,9 @@ def _parse_ts(line: str) -> datetime | None:
     """Pull the leading ``[epoch.us]`` timestamp; fall back to now() if absent."""
     m = _TIMESTAMP.match(line)
     if m is None:
-        return datetime.now(tz=timezone.utc)
+        return datetime.now(tz=UTC)
     try:
-        return datetime.fromtimestamp(float(m.group("ts")), tz=timezone.utc)
+        return datetime.fromtimestamp(float(m.group("ts")), tz=UTC)
     except (ValueError, OSError):
         return None
 

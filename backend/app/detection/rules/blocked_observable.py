@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import BlockedObservable, Event
+from app.db.redis_state import safe_redis
 from app.detection.engine import DetectionResult, register
 from app.enums import DetectionRuleSource, Severity
 
@@ -20,7 +21,11 @@ _CHECKABLE_FIELDS = ("source_ip", "dst_ip", "src_ip", "user", "host", "image", "
 
 
 async def _get_active_values(db: AsyncSession, redis: aioredis.Redis) -> set[str]:
-    cached = await redis.get(_CACHE_KEY)
+    # Redis cache is best-effort; on outage we fall through to the authoritative DB query.
+    cached = await safe_redis(
+        redis.get(_CACHE_KEY),
+        rule_id=RULE_ID, op_name="get_cache", default=None,
+    )
     if cached:
         return set(json.loads(cached))
 
@@ -29,7 +34,10 @@ async def _get_active_values(db: AsyncSession, redis: aioredis.Redis) -> set[str
     )
     values = {row[0] for row in result.all()}
     if values:
-        await redis.set(_CACHE_KEY, json.dumps(list(values)), ex=_CACHE_TTL)
+        await safe_redis(
+            redis.set(_CACHE_KEY, json.dumps(list(values)), ex=_CACHE_TTL),
+            rule_id=RULE_ID, op_name="set_cache", default=None,
+        )
     return values
 
 

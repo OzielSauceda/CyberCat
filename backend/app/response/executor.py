@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
-from typing import Callable, Awaitable
+from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -158,7 +158,7 @@ async def execute_action(
     action.status = new_status
     log = ActionLog(
         action_id=action.id,
-        executed_at=datetime.now(timezone.utc),
+        executed_at=datetime.now(UTC),
         executed_by=executed_by,
         result=result,
         reason=reason,
@@ -203,7 +203,7 @@ async def revert_action(
     action.status = ActionStatus.reverted
     revert_log = ActionLog(
         action_id=action.id,
-        executed_at=datetime.now(timezone.utc),
+        executed_at=datetime.now(UTC),
         executed_by=executed_by,
         result=result,
         reason=reason,

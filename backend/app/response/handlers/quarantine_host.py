@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,7 +28,7 @@ async def execute(action: Action, db: AsyncSession) -> tuple[ActionResult, str |
     if asset is None:
         return ActionResult.fail, f"host {host!r} not found in lab_assets", None
 
-    ts = datetime.now(timezone.utc).isoformat()
+    ts = datetime.now(UTC).isoformat()
     marker = f"[quarantined:incident-{action.incident_id}:at-{ts}]"
     prior_notes = asset.notes or ""
     if _MARKER_PREFIX not in prior_notes:

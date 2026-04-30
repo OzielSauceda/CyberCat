@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import logging
 import uuid
+from datetime import UTC, datetime
 from decimal import Decimal
-from datetime import datetime, timezone
 
 import redis.asyncio as aioredis
 from sqlalchemy import select
@@ -22,6 +22,7 @@ from app.db.models import (
     IncidentEvent,
     IncidentTransition,
 )
+from app.db.redis_state import safe_redis
 from app.enums import (
     AttackSource,
     EntityKind,
@@ -78,10 +79,27 @@ async def endpoint_compromise_standalone(
         host_natural_key = host_entity.natural_key
 
     # Redis hour-bucket dedup — SETNX; if already set, a standalone incident opened this hour
-    hour_bucket = datetime.now(timezone.utc).strftime("%Y%m%d%H")
+    hour_bucket = datetime.now(UTC).strftime("%Y%m%d%H")
     dedup_redis_key = f"endpoint_compromise:{host_natural_key}:{hour_bucket}"
-    was_set = await redis.set(dedup_redis_key, "1", nx=True, ex=_DEDUP_TTL)
-    if not was_set:
+    # Sentinel disambiguates redis-unavailable from "key already existed" — the
+    # latter is what `redis.set(NX)` signals by returning None.
+    _UNAVAILABLE = object()
+    was_set = await safe_redis(
+        redis.set(dedup_redis_key, "1", nx=True, ex=_DEDUP_TTL),
+        rule_id="endpoint_compromise_standalone",
+        op_name="dedup_setnx",
+        default=_UNAVAILABLE,
+    )
+    if was_set is _UNAVAILABLE:
+        # Redis is down — fall through and rely on the uq_incidents_dedupe_key
+        # constraint (a duplicate INSERT will raise; the prior incident wins).
+        log.warning(
+            "endpoint_compromise_standalone: redis dedup unavailable for host=%s bucket=%s — proceeding without",
+            host_natural_key,
+            hour_bucket,
+        )
+    elif not was_set:
+        # was_set is None (NX denied because key exists) or False — dedup hit.
         log.info(
             "endpoint_compromise_standalone: dedup hit for host=%s bucket=%s — skipping",
             host_natural_key,

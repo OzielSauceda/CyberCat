@@ -32,5 +32,11 @@ COPY alembic.ini .
 COPY start.sh .
 RUN chmod +x start.sh
 
+# Phase 19: detection-as-code fixtures live at the repo root (`labs/fixtures/`)
+# and are bind-mounted into the backend container at /app/labs by docker-compose.
+# The CI workflow (`.github/workflows/ci.yml`) sets PYTHONPATH so test discovery
+# finds them via the `labs/fixtures/` resolution path in
+# `tests/integration/test_detection_fixtures.py::_find_fixtures_dir()`.
+
 EXPOSE 8000
 CMD ["./start.sh"]

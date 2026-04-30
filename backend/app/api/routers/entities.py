@@ -7,8 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.schemas.errors import ErrorEnvelope
 from app.api.schemas.entities import EntityDetail, EntityIncidentSummary, EntityTimelineEvent
+from app.api.schemas.errors import ErrorEnvelope
 from app.db.models import Entity, Event, EventEntity, Incident, IncidentEntity
 from app.db.session import get_db
 from app.enums import EntityKind

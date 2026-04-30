@@ -1,0 +1,1 @@
+{"_t_offset_sec": 30, "source": "direct", "kind": "network.connection", "raw": {}, "normalized": {"host": "lab-debian", "src_ip": "10.0.0.5", "dst_ip": "1.1.1.1", "dst_port": 443, "proto": "tcp"}, "dedupe_key": "fixture:net:benign:1"}

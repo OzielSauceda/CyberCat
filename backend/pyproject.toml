@@ -26,7 +26,10 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
+    "pytest-randomly>=3.15",
     "httpx>=0.27",
+    "ruff>=0.6",
+    "mypy>=1.10",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -37,3 +40,34 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "session"
 asyncio_default_test_loop_scope = "session"
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+extend-exclude = ["alembic/versions"]
+
+[tool.ruff.lint]
+# Phase 19: conservative ruleset. Add categories incrementally as the codebase
+# tightens; never widen on a hot deadline.
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = [
+    "E501",   # line length: handled by formatter, not blocker for review
+    "B008",   # function-call-in-default-argument: pydantic Field(...) is canonical
+    "UP007",  # `X | Y` for Optional: noisy across pydantic v1-style annotations
+    "UP042",  # str-enum suggestion: codebase pattern is `(str, Enum)`, churn vs benefit not worth it
+    "UP047",  # PEP-695 generics: Python 3.12 syntax; not adopting yet
+    "E731",   # lambda-assignment: rare, situationally clearer than def
+    "E741",   # ambiguous-variable-name (l, I, O): rare, accepted in math/short scopes
+    "B007",   # unused-loop-control-variable: usually benign
+]
+
+[tool.mypy]
+python_version = "3.12"
+strict_optional = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+# Phase 19: enable strict mode incrementally. Start with the must-haves below;
+# tighten further (disallow_untyped_defs, etc.) as a follow-up phase.
+check_untyped_defs = true
+ignore_missing_imports = true
+exclude = ["alembic/versions/"]

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -73,7 +73,7 @@ async def execute(action: Action, db: AsyncSession) -> tuple[ActionResult, str |
     prior_invalidated_at = (
         session.invalidated_at.isoformat() if session.invalidated_at else None
     )
-    session.invalidated_at = datetime.now(timezone.utc)
+    session.invalidated_at = datetime.now(UTC)
     session.invalidated_by_action_id = action.id
 
     return ActionResult.ok, None, {

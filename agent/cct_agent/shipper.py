@@ -116,7 +116,7 @@ class Shipper:
                 break
             try:
                 event = await asyncio.wait_for(self.queue.get(), timeout=remaining)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 break
             batch.append(event)
         return batch

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from typing import Awaitable, Callable
+from collections.abc import Awaitable, Callable
 
 import redis.asyncio as aioredis
 from sqlalchemy.ext.asyncio import AsyncSession
