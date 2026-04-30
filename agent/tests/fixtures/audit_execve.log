@@ -1,0 +1,27 @@
+type=SYSCALL msg=audit(1777374000.000:456): arch=c000003e syscall=59 success=yes exit=0 a0=55f1001 a1=55f1002 a2=55f1003 a3=0 items=2 ppid=1234 pid=5678 auid=1000 uid=1000 gid=1000 euid=1000 suid=1000 fsuid=1000 egid=1000 sgid=1000 fsgid=1000 tty=pts0 ses=3 comm="bash" exe="/bin/bash" subj=unconfined key="cybercat_exec"
+type=EXECVE msg=audit(1777374000.000:456): argc=3 a0="bash" a1="-c" a2="id"
+type=CWD msg=audit(1777374000.000:456): cwd="/home/user"
+type=PATH msg=audit(1777374000.000:456): item=0 name="/bin/bash" inode=12345 dev=fd:00 mode=0100755 ouid=0 ogid=0 rdev=00:00 nametype=NORMAL
+type=PROCTITLE msg=audit(1777374000.000:456): proctitle=62617368002D63006964
+type=EOE msg=audit(1777374000.000:456):
+type=SYSCALL msg=audit(1777374001.000:457): arch=c000003e syscall=59 success=yes exit=0 a0=55a1001 a1=55a1002 a2=0 a3=0 items=2 ppid=1234 pid=5679 auid=1000 uid=1000 gid=1000 euid=1000 suid=1000 fsuid=1000 egid=1000 sgid=1000 fsgid=1000 tty=pts0 ses=4 comm="python3" exe="/usr/bin/python3" subj=unconfined key="cybercat_exec"
+type=EXECVE msg=audit(1777374001.000:457): argc=2 a0="/usr/bin/python3" a1="/tmp/script.py"
+type=CWD msg=audit(1777374001.000:457): cwd="/tmp"
+type=PATH msg=audit(1777374001.000:457): item=0 name="/usr/bin/python3" inode=22345 dev=fd:00 mode=0100755 ouid=0 ogid=0 rdev=00:00 nametype=NORMAL
+type=EOE msg=audit(1777374001.000:457):
+type=SYSCALL msg=audit(1777374002.000:458): arch=c000003e syscall=59 success=yes exit=0 a0=55b1001 a1=55b1002 a2=55b1003 a3=0 items=2 ppid=5678 pid=5680 auid=1000 uid=1000 gid=1000 euid=1000 suid=1000 fsuid=1000 egid=1000 sgid=1000 fsgid=1000 tty=pts0 ses=3 comm="sh" exe="/bin/sh" subj=unconfined key="cybercat_exec"
+type=EXECVE msg=audit(1777374002.000:458): argc=3 a0=6C73 a1=2D6C61 a2=2F657463
+type=CWD msg=audit(1777374002.000:458): cwd="/home/user"
+type=PATH msg=audit(1777374002.000:458): item=0 name="/bin/sh" inode=32345 dev=fd:00 mode=0100755 ouid=0 ogid=0 rdev=00:00 nametype=NORMAL
+type=EOE msg=audit(1777374002.000:458):
+type=SYSCALL msg=audit(1777374003.000:459): arch=c000003e syscall=59 success=yes exit=0 a0=55c1001 a1=55c1002 a2=55c1003 a3=0 items=2 ppid=5678 pid=5681 auid=1000 uid=1000 gid=1000 euid=1000 suid=1000 fsuid=1000 egid=1000 sgid=1000 fsgid=1000 tty=pts0 ses=3 comm="winword.exe" exe="/tmp/winword.exe" subj=unconfined key="cybercat_exec"
+type=EXECVE msg=audit(1777374003.000:459): argc=3 a0="/tmp/winword.exe" a1="-c" a2="id; uname -a; exit"
+type=CWD msg=audit(1777374003.000:459): cwd="/tmp"
+type=PATH msg=audit(1777374003.000:459): item=0 name="/tmp/winword.exe" inode=42345 dev=fd:00 mode=0100755 ouid=1000 ogid=1000 rdev=00:00 nametype=NORMAL
+type=PROCTITLE msg=audit(1777374003.000:459): proctitle=2F746D702F77696E776F72642E657865002D630069643B20756E616D65202D61
+type=EOE msg=audit(1777374003.000:459):
+type=SYSCALL msg=audit(1777374004.000:460): arch=c000003e syscall=59 success=yes exit=0 a0=55d1001 a1=55d1002 a2=0 a3=0 items=2 ppid=1234 pid=5682 auid=0 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=5 comm="ls" subj=unconfined key="cybercat_exec"
+type=EXECVE msg=audit(1777374004.000:460): argc=3 a0="ls" a1="-la" a2="/var/log"
+type=CWD msg=audit(1777374004.000:460): cwd="/root"
+type=PATH msg=audit(1777374004.000:460): item=0 name="/usr/bin/ls" inode=52345 dev=fd:00 mode=0100755 ouid=0 ogid=0 rdev=00:00 nametype=NORMAL
+type=EOE msg=audit(1777374004.000:460):

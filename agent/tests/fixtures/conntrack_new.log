@@ -1,0 +1,6 @@
+[1777418334.439228]	    [NEW] ipv4     2 tcp      6 120 SYN_SENT src=172.18.0.2 dst=172.66.147.243 sport=55068 dport=80 [UNREPLIED] src=172.66.147.243 dst=172.18.0.2 sport=80 dport=55068
+[1777418400.123456]	    [NEW] ipv4     2 tcp      6 120 SYN_SENT src=10.0.0.5 dst=203.0.113.42 sport=54321 dport=443 [UNREPLIED] src=203.0.113.42 dst=10.0.0.5 sport=443 dport=54321 mark=0 use=1 id=12345
+[1777418275.833874]	    [NEW] ipv4     2 udp      17 30 src=10.0.0.5 dst=8.8.8.8 sport=44321 dport=53 [UNREPLIED] src=8.8.8.8 dst=10.0.0.5 sport=53 dport=44321
+[1777418500.000000]	    [NEW] ipv4     2 icmp     1 30 src=10.0.0.5 dst=8.8.8.8 type=8 code=0 id=4242 [UNREPLIED] src=8.8.8.8 dst=10.0.0.5 type=0 code=0 id=4242
+[1777418275.999999]	    [NEW] ipv4     2 udp      17 30 src=127.0.0.1 dst=127.0.0.11 sport=59463 dport=53 [UNREPLIED] src=127.0.0.11 dst=127.0.0.1 sport=54378 dport=59463
+not even close to a conntrack record line
