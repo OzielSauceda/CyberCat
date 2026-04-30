@@ -732,6 +732,63 @@ After running `smoke_test_phase9a.sh`:
 **Lab:**
 17. Navigate to `http://localhost:3000/lab`. Alice, lab-win10-01, 203.0.113.7 listed. Add/delete assets.
 
+## CI / GitHub Actions (Phase 19)
+
+Two workflows guard the repo. Both live in `.github/workflows/`.
+
+### `ci.yml` — fast lint + tests, every push and every PR
+
+Three jobs run in parallel on Ubuntu runners:
+
+| Job | What it does | Approx time |
+|---|---|---|
+| `backend (lint + tests)` | Spins up `postgres:16` + `redis:7-alpine` services, installs `backend/[dev]`, runs `alembic upgrade head`, then `ruff check app/` and `pytest tests/`. | ~1m |
+| `agent (lint + tests)` | Installs `agent/[dev]`, runs `ruff check cct_agent/` and `pytest tests/` (skips `test_events_network.py` + `test_events_process.py` — those import `app.*` which only resolves inside the backend image). | ~1m |
+| `frontend (typecheck + build)` | `npm ci`, `npx tsc --noEmit`, `npm run build`. | ~1m |
+
+Triggers: every push to any branch, every pull request. Concurrency-grouped by `github.ref` so a fast follow-up push cancels the in-flight run.
+
+`pytest` runs with `-p no:randomly` on CI to keep the merge gate deterministic. The plugin is still installed and on by default for local runs — that's where you want random ordering to keep shaking out order-dependent issues.
+
+### `smoke.yml` — full-stack end-to-end smoke chain
+
+One job (`docker-compose smoke chain`) on an Ubuntu runner:
+
+1. Brings up the full agent-profile stack via `bash start.sh` (defaults to `--profile agent`, which starts `postgres redis backend frontend lab-debian cct-agent` and provisions `CCT_AGENT_TOKEN` via `python -m app.cli issue-token`).
+2. Waits for `/v1/incidents` to respond.
+3. Runs `bash labs/smoke_test_phase17.sh` first (the auto-seed contract test — must pass on a fresh volume).
+4. Iterates through the remaining default-profile smoke scripts in order: `phase10`, `phase9a`, `phase15`, `phase16_9`, `phase16_10`, `agent`. Each script's output is teed to `smoke-logs/<name>.log`.
+5. On any script failure: emits a `::error::` annotation per tail-line of the failing log (within GitHub's 10-annotation cap), captures backend + cct-agent + lab-debian logs, uploads `smoke-logs/` as a workflow artifact (7-day retention), and exits non-zero.
+6. Tear-down: `docker compose --profile agent down -v`.
+
+Triggers:
+- Every push to `main`.
+- Daily 06:00 UTC cron.
+- Manual `workflow_dispatch` from the Actions tab.
+- Pull requests that touch `.github/workflows/smoke.yml`, `infra/compose/**`, `labs/smoke_test_*.sh`, or `start.sh` — narrow path filter so workflow / compose / smoke-script changes self-validate before merging without paying smoke cost on every PR.
+
+Skipped on CI by design: `smoke_test_phase8.sh` and `smoke_test_phase11.sh` (Wazuh-only — they need `--profile wazuh` plus seeded TLS material).
+
+### Reading a CI failure without GitHub login
+
+GitHub Actions job logs are auth-walled even on public repos, so we surface failure detail two ways that are visible to anyone:
+
+- **`::error::` workflow-command annotations.** Both workflows tee `pytest` / smoke output and emit `::error::` lines for every FAILED test, error message, or summary line. These are publicly fetchable via the check-runs annotations API:
+  ```bash
+  # Find the failing job ID
+  curl -s https://api.github.com/repos/OzielSauceda/CyberCat/actions/runs/<RUN_ID>/jobs | \
+    python -c "import json,sys; [print(j['id'],j['name'],j['conclusion']) for j in json.load(sys.stdin)['jobs']]"
+
+  # Then fetch its annotations
+  curl -s https://api.github.com/repos/OzielSauceda/CyberCat/check-runs/<JOB_ID>/annotations | \
+    python -m json.tool
+  ```
+- **Smoke-logs artifact.** The `smoke-logs/` directory uploaded by `smoke.yml` has the full per-script output. Artifacts download from the run page (requires GitHub login).
+
+GitHub caps annotations at 10 per check, so the surfacers are tuned to emit pytest's short-test-summary block (FAILED test name + assertion message, which lives at the very end of the log) — `tail -10` for backend pytest and `tail -8` for each smoke script.
+
+---
+
 ## Run individual smoke tests
 
 ```bash

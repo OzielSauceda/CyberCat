@@ -2,6 +2,27 @@
 
 Pick up here. Read this top-to-bottom; it's the shortest path to context.
 
+---
+
+## STATUS — ✅ SHIPPED 2026-04-30 (read this first)
+
+**Phase 19 merged to `main` via PR #5** (`phase-19` → `main`, commit `efde988`). Everything described below as "must close before shipping" did close, in the order originally prescribed plus the Windows/WSL2 platform diagnosis. Backend pytest **236/236**, agent pytest **104/104**, ruff clean, frontend typecheck clean, Linux smoke chain **7/7**.
+
+**One follow-up still open: PR #6** (`fix/smoke-workflow-agent-profile`) hot-fixes the Smoke workflow that shipped in this batch. Root cause: the workflow was push-to-main-only, never ran during the PR cycle, and turned out to bring up only `postgres redis backend frontend` — but three of the six smoke scripts in step 5 (`smoke_test_phase16_9.sh`, `smoke_test_phase16_10.sh`, `smoke_test_agent.sh`) require `cct-agent` + `lab-debian` (the `agent` compose profile) AND a `CCT_AGENT_TOKEN` provisioned by `start.sh`'s bootstrap. Fix: replaced the bare `docker compose up` with `bash start.sh` (defaults to `--profile agent` + token bootstrap), installed `httpx` on the runner (the simulator + replay drive the backend over HTTP from the host), pinned `pytest` ordering on the merge gate (`-p no:randomly` — pytest-randomly was double-flaking the same commit between push and PR triggers), added per-script `::error::` annotation surfacing + a `smoke-logs` artifact, and added a narrow `pull_request` trigger so future smoke/compose changes self-validate before merge.
+
+**Also landed during the merge cycle:** `*.log` in `.gitignore` (under `# Docker`) was eating five test fixture files in `agent/tests/fixtures/` — they existed locally so my pytest passed but the GH Actions checkout had nothing in the directory. Fixed via `!agent/tests/fixtures/*.log` negation + force-tracking.
+
+**Remaining work (next session pick-up):**
+1. Merge PR #6 — green on all 6 checks (CI push + PR × 3 jobs, Smoke PR run).
+2. Watch the Smoke workflow on `main` after merge. Should be green (we just verified the same workflow on the PR trigger).
+3. Tag `v0.9` against the merge commit. The redis-kill chaos test still surfaces `httpx.ReadTimeout` on **Windows/WSL2 + Docker Desktop only** — diagnosed as a getaddrinfo NXDOMAIN platform issue (~3.6s lookup, uncancellable from asyncio because it runs in a thread pool slot), not a backend bug. Re-run the chaos commands from "How to verify the fixes worked" below against a Linux host (or via a `workflow_dispatch` invocation) before tagging if you want a Linux-clean tag. If they pass, ship; if they don't, the deferred work in "A1.1 residual gap" needs to land first.
+
+For a plain-language overview of what Phase 19 actually changed in the codebase (NEW vs MODIFIED, did the architecture change?), see `docs/phase-19-summary.md`.
+
+The original handoff content below is preserved verbatim for the historical record; the gap-1 / gap-2 notes captured the in-flight state at the time it was written.
+
+---
+
 ## TL;DR
 
 - Phase 19 code work for A1–A7, B, C, D is **complete on disk** but **not committed**.
