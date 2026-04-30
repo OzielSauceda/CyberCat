@@ -29,6 +29,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set up Python + install host-side smoke deps
+        # The smoke scripts assert that 'httpx' is importable on the
+        # host because labs/simulator/* and labs/fixtures/replay.py
+        # drive the backend over HTTP from the host (not a container).
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install httpx
+        run: pip install "httpx>=0.27"
+
       - name: Bring up agent-profile stack (start.sh handles token bootstrap)
         run: |
           # start.sh defaults to --profile agent: it brings up postgres,
@@ -75,7 +86,11 @@ jobs:
             if [ "$status" -ne 0 ]; then
               failed="$failed $name(exit=$status)"
               echo "::error title=Smoke script failed::$name exited with $status"
-              tail -40 "smoke-logs/$name.log" \
+              # GitHub caps annotations at 10 per check, so surface only
+              # the final lines of the failing log — that's where the
+              # actual error message lives. Full output is in the
+              # smoke-logs artifact (uploaded below).
+              tail -8 "smoke-logs/$name.log" \
                 | sed 's/%/%25/g' \
                 | while IFS= read -r line; do echo "::error::[$name] $line"; done
             fi
