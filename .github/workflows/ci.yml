@@ -95,10 +95,22 @@ jobs:
         working-directory: agent
         # Skip cross-project tests that depend on the backend package being importable.
         run: |
+          set -o pipefail
           pytest tests/ \
             --ignore=tests/test_events_network.py \
             --ignore=tests/test_events_process.py \
-            -v
+            -v --tb=long -ra 2>&1 | tee pytest-agent.log
+
+      - name: Surface pytest output to run summary
+        if: always()
+        working-directory: agent
+        run: |
+          {
+            echo '## Agent pytest output (last 300 lines)'
+            echo '```'
+            tail -300 pytest-agent.log 2>/dev/null || echo "(no log captured)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
   frontend:
     name: frontend (typecheck + build)
