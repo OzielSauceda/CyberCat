@@ -3,6 +3,15 @@ name: Smoke
 on:
   push:
     branches: [main]
+  pull_request:
+    # Only fire on PRs that actually touch the smoke surface, so we can
+    # validate workflow / compose / smoke-script / start.sh changes
+    # before they merge — without paying full smoke cost on every PR.
+    paths:
+      - .github/workflows/smoke.yml
+      - infra/compose/**
+      - labs/smoke_test_*.sh
+      - start.sh
   schedule:
     # 06:00 UTC daily — early in the morning EU, late evening US
     - cron: "0 6 * * *"
@@ -20,11 +29,31 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Bring up default-profile stack
+      - name: Set up Python + install host-side smoke deps
+        # The smoke scripts assert that 'httpx' is importable on the
+        # host because labs/simulator/* and labs/fixtures/replay.py
+        # drive the backend over HTTP from the host (not a container).
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install httpx
+        run: pip install "httpx>=0.27"
+
+      - name: Bring up agent-profile stack (start.sh handles token bootstrap)
         run: |
-          cd infra/compose
-          docker compose up -d --wait postgres redis backend frontend
-          # Give the backend a generous window to finish first-boot migrations + auto-seed
+          # start.sh defaults to --profile agent: it brings up postgres,
+          # redis, backend, frontend, lab-debian, cct-agent and provisions
+          # the CCT_AGENT_TOKEN via `python -m app.cli issue-token`. The
+          # phase16_9 / phase16_10 / agent smoke scripts all require the
+          # cct-agent + lab-debian containers, so the smoke chain must use
+          # the agent profile (not the bare default-profile up).
+          # Invoke via 'bash' explicitly — start.sh is tracked as mode
+          # 100644 (the repo lives on Windows, where git doesn't preserve
+          # executable bits), so a bare ./start.sh would die with exit 126.
+          bash start.sh
+          # Give the backend a generous window to finish first-boot
+          # migrations + auto-seed before any smoke script runs.
           for i in $(seq 1 60); do
             if curl -sf http://localhost:8000/v1/incidents > /dev/null 2>&1; then
               echo "backend ready"
@@ -32,6 +61,7 @@ jobs:
             fi
             sleep 2
           done
+          docker compose -f infra/compose/docker-compose.yml --profile agent ps
 
       - name: Run Phase 17 smoke first (auto-seed contract)
         run: bash labs/smoke_test_phase17.sh
@@ -39,7 +69,8 @@ jobs:
       - name: Run remaining default-profile smoke tests
         # Wazuh-only smokes (phase8, phase11) need --profile wazuh and are excluded.
         run: |
-          set -e
+          mkdir -p smoke-logs
+          failed=""
           for script in \
             labs/smoke_test_phase10.sh \
             labs/smoke_test_phase9a.sh \
@@ -47,19 +78,45 @@ jobs:
             labs/smoke_test_phase16_9.sh \
             labs/smoke_test_phase16_10.sh \
             labs/smoke_test_agent.sh; do
-            echo "::group::$(basename "$script")"
-            bash "$script"
+            name=$(basename "$script" .sh)
+            echo "::group::$name"
+            bash "$script" 2>&1 | tee "smoke-logs/$name.log"
+            status=${PIPESTATUS[0]}
             echo "::endgroup::"
+            if [ "$status" -ne 0 ]; then
+              failed="$failed $name(exit=$status)"
+              echo "::error title=Smoke script failed::$name exited with $status"
+              # GitHub caps annotations at 10 per check, so surface only
+              # the final lines of the failing log — that's where the
+              # actual error message lives. Full output is in the
+              # smoke-logs artifact (uploaded below).
+              tail -8 "smoke-logs/$name.log" \
+                | sed 's/%/%25/g' \
+                | while IFS= read -r line; do echo "::error::[$name] $line"; done
+            fi
           done
+          if [ -n "$failed" ]; then
+            echo "FAILED scripts:$failed"
+            exit 1
+          fi
+
+      - name: Upload smoke logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-logs
+          path: smoke-logs/
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Capture backend logs on failure
         if: failure()
         run: |
           cd infra/compose
-          docker compose logs backend --tail 200
+          docker compose --profile agent logs backend cct-agent lab-debian --tail 200
 
       - name: Tear down
         if: always()
         run: |
           cd infra/compose
-          docker compose down -v
+          docker compose --profile agent down -v
