@@ -67,9 +67,16 @@ jobs:
 
       - name: Pytest (backend)
         working-directory: backend
+        # -p no:randomly: pytest-randomly is great for catching
+        # order-dependent bugs locally, but we've seen the same
+        # commit pass on one CI trigger and fail on another (flaky
+        # ordering against the shared Postgres service). Keep the
+        # plugin loaded but disable shuffling on CI so the merge gate
+        # is deterministic. To shake out order-dependence locally,
+        # run pytest without -p no:randomly.
         run: |
           set -o pipefail
-          pytest tests/ -v --tb=long -ra 2>&1 | tee pytest-backend.log
+          pytest tests/ -v --tb=long -ra -p no:randomly 2>&1 | tee pytest-backend.log
 
       - name: Surface backend failure detail as annotations
         if: failure()
@@ -79,12 +86,12 @@ jobs:
             echo "::error::no pytest log produced"
             exit 0
           fi
-          grep -nE "^(FAILED|ERROR|E   |>   |_+ .+ _+|tests/.+::|=+ short test summary|=+ [0-9]+ (failed|passed|error))" pytest-backend.log \
-            | tail -80 \
-            | while IFS= read -r line; do
-                clean=$(printf '%s' "$line" | tr -d '\r' | sed 's/%/%25/g; s/\r/%0D/g; s/\n/%0A/g')
-                echo "::error::$clean"
-              done
+          # GitHub caps annotations at 10 per check, and pytest's
+          # short-test-summary block at the very end has the FAILED
+          # test name + assertion message. tail -10 hits exactly that.
+          tail -10 pytest-backend.log \
+            | sed 's/%/%25/g' \
+            | while IFS= read -r line; do echo "::error::$line"; done
 
   agent:
     name: agent (lint + tests)
@@ -111,12 +118,14 @@ jobs:
       - name: Pytest (agent)
         working-directory: agent
         # Skip cross-project tests that depend on the backend package being importable.
+        # -p no:randomly: keep the merge gate deterministic; see comment on
+        # the equivalent backend step for the reasoning.
         run: |
           set -o pipefail
           pytest tests/ \
             --ignore=tests/test_events_network.py \
             --ignore=tests/test_events_process.py \
-            -v --tb=long -ra 2>&1 | tee pytest-agent.log
+            -v --tb=long -ra -p no:randomly 2>&1 | tee pytest-agent.log
 
       - name: Surface pytest output to run summary
         if: always()
