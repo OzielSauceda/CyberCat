@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -79,7 +79,7 @@ async def collect_evidence_request(
         raise HTTPException(status_code=409, detail=f"Request is already {er.status.value}")
     actor_id = await resolve_actor_id(current_user, db)
     er.status = EvidenceStatus.collected
-    er.collected_at = datetime.now(timezone.utc)
+    er.collected_at = datetime.now(UTC)
     er.collected_by_user_id = actor_id
     await db.commit()
     await publish("evidence.collected", {

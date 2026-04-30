@@ -8,6 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Event
+from app.db.redis_state import safe_redis
 from app.detection.engine import DetectionResult, register
 from app.enums import DetectionRuleSource, Severity
 
@@ -29,9 +30,14 @@ async def auth_anomalous_source_success(
     if not user or not source_ip:
         return []
 
-    # Require recent failures for this user to still be in the window
+    # Require recent failures for this user to still be in the window.
+    # If Redis is down the premise is unverifiable — skip rather than fire on
+    # every successful login (which would be a flood of false positives).
     window_key = f"corr:auth_failures:{user}"
-    failure_count_raw = await redis.get(window_key)
+    failure_count_raw = await safe_redis(
+        redis.get(window_key),
+        rule_id=RULE_ID, op_name="get_failure_window", default=None,
+    )
     if not failure_count_raw or int(failure_count_raw) < 1:
         return []
 

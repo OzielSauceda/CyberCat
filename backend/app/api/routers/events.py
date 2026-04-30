@@ -16,6 +16,7 @@ from app.db.session import get_db
 from app.enums import EventSource
 from app.ingest.normalizer import KNOWN_KINDS, validate_normalized
 from app.ingest.pipeline import ingest_normalized_event
+from app.ingest.retry import with_ingest_retry
 
 router = APIRouter(prefix="/events", tags=["ingest"])
 
@@ -60,7 +61,6 @@ async def list_events(
 @router.post("/raw", response_model=RawEventAccepted, status_code=201)
 async def ingest_raw_event(
     body: RawEventIn,
-    db: AsyncSession = Depends(get_db),
     redis: aioredis.Redis = Depends(get_redis),
     _user: User | SystemUser = Depends(require_analyst),
 ) -> RawEventAccepted:
@@ -83,16 +83,19 @@ async def ingest_raw_event(
             },
         )
 
-    result = await ingest_normalized_event(
-        db,
-        redis,
-        source=EventSource(body.source),
-        kind=body.kind,
-        occurred_at=body.occurred_at,
-        raw=body.raw,
-        normalized=body.normalized,
-        dedupe_key=body.dedupe_key,
-    )
+    async def _do_ingest(session: AsyncSession):
+        return await ingest_normalized_event(
+            session,
+            redis,
+            source=EventSource(body.source),
+            kind=body.kind,
+            occurred_at=body.occurred_at,
+            raw=body.raw,
+            normalized=body.normalized,
+            dedupe_key=body.dedupe_key,
+        )
+
+    result = await with_ingest_retry(_do_ingest)
 
     return RawEventAccepted(
         event_id=result.event_id,

@@ -4,7 +4,7 @@ import asyncio
 import json
 import logging
 import ssl
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 from sqlalchemy import text
@@ -13,12 +13,24 @@ from app.config import settings
 from app.db.session import AsyncSessionLocal
 from app.enums import EventSource
 from app.ingest.pipeline import ingest_normalized_event
+from app.ingest.retry import with_ingest_retry
 from app.ingest.wazuh_decoder import decode_wazuh_alert
 
 logger = logging.getLogger(__name__)
 
 _SINGLETON = "singleton"
 _prev_reachable: bool | None = None  # tracks reachability across poll cycles
+
+# Phase 19: circuit-breaker for sustained per-hit ingest failures.
+# After this many *consecutive* ingest exceptions in a single batch, abort the
+# batch without advancing the cursor past the failed hits. The outer poll loop
+# applies its existing exponential backoff and replays the unprocessed tail on
+# the next iteration.
+_CONSECUTIVE_INGEST_FAIL_LIMIT = 10
+
+
+class WazuhPollerCircuitOpen(Exception):
+    """Raised when the per-hit ingest circuit-breaker trips."""
 
 
 def build_query(
@@ -148,35 +160,44 @@ async def _poll_once(
 
     hits: list[dict] = resp.json().get("hits", {}).get("hits", [])
 
+    breaker_tripped = False
+    consecutive_ingest_failures = 0
     if hits:
         from app.db.redis import get_redis as _get_redis  # noqa: PLC0415
         redis = _get_redis()
         for hit in hits:
-            last_sort = hit.get("sort")  # advance cursor past this hit regardless
+            hit_sort = hit.get("sort")
             source = hit.get("_source", {})
             source["_id"] = hit.get("_id", "")
             decoded = decode_wazuh_alert(source)
             if decoded is None:
+                # Decoder rejection is a poison-message case; advance past it so we
+                # don't loop on the same bad hit. Does not feed the circuit-breaker.
                 dropped += 1
+                last_sort = hit_sort
                 continue
             try:
-                async with AsyncSessionLocal() as db:
-                    result = await ingest_normalized_event(
+                async def _ingest(db, _decoded=decoded):
+                    return await ingest_normalized_event(
                         db,
                         redis,
                         source=EventSource.wazuh,
-                        kind=decoded.kind,
-                        occurred_at=decoded.occurred_at,
-                        raw=decoded.raw,
-                        normalized=decoded.normalized,
-                        dedupe_key=decoded.dedupe_key,
+                        kind=_decoded.kind,
+                        occurred_at=_decoded.occurred_at,
+                        raw=_decoded.raw,
+                        normalized=_decoded.normalized,
+                        dedupe_key=_decoded.dedupe_key,
                     )
+
+                result = await with_ingest_retry(_ingest)
                 if result.dedup_hit:
                     logger.debug(
                         "wazuh dedup hit dedupe_key=%s", decoded.dedupe_key
                     )
                 else:
                     accepted += 1
+                consecutive_ingest_failures = 0
+                last_sort = hit_sort
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
                     "wazuh ingest error dedupe_key=%s err=%s",
@@ -184,6 +205,17 @@ async def _poll_once(
                     exc,
                 )
                 dropped += 1
+                consecutive_ingest_failures += 1
+                if consecutive_ingest_failures >= _CONSECUTIVE_INGEST_FAIL_LIMIT:
+                    logger.error(
+                        "wazuh poller circuit-breaker tripped"
+                        " consecutive_failures=%d batch_size=%d"
+                        " — aborting batch, cursor will not advance past failed hits",
+                        consecutive_ingest_failures,
+                        len(hits),
+                    )
+                    breaker_tripped = True
+                    break
 
         async with AsyncSessionLocal() as db:
             # Only advance search_after when last_sort is set; otherwise keep existing
@@ -227,6 +259,14 @@ async def _poll_once(
                     },
                 )
             await db.commit()
+
+        if breaker_tripped:
+            # Outer poller_loop catches this, applies exponential backoff, and
+            # the next poll replays the unprocessed tail of the batch via the
+            # un-advanced search_after cursor.
+            raise WazuhPollerCircuitOpen(
+                f"{consecutive_ingest_failures} consecutive ingest failures"
+            )
     else:
         async with AsyncSessionLocal() as db:
             await db.execute(
@@ -264,9 +304,9 @@ async def _emit_wazuh_transition(reachable: bool, last_error: str | None = None)
 async def _interruptible_sleep(stop_event: asyncio.Event, seconds: float) -> None:
     try:
         await asyncio.wait_for(stop_event.wait(), timeout=seconds)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         pass
 
 
 def _now() -> datetime:
-    return datetime.now(tz=timezone.utc)
+    return datetime.now(tz=UTC)

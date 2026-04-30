@@ -1,0 +1,4 @@
+{"_t_offset_sec": 50, "source": "direct", "kind": "auth.failed", "raw": {"src_user": "bob"}, "normalized": {"user": "bob", "source_ip": "203.0.113.99", "auth_type": "password"}, "dedupe_key": "fixture:auth:anomalous:fail1"}
+{"_t_offset_sec": 40, "source": "direct", "kind": "auth.failed", "raw": {"src_user": "bob"}, "normalized": {"user": "bob", "source_ip": "203.0.113.99", "auth_type": "password"}, "dedupe_key": "fixture:auth:anomalous:fail2"}
+{"_t_offset_sec": 30, "source": "direct", "kind": "auth.failed", "raw": {"src_user": "bob"}, "normalized": {"user": "bob", "source_ip": "203.0.113.99", "auth_type": "password"}, "dedupe_key": "fixture:auth:anomalous:fail3"}
+{"_t_offset_sec": 10, "source": "direct", "kind": "auth.succeeded", "raw": {"src_user": "bob"}, "normalized": {"user": "bob", "source_ip": "203.0.113.99", "auth_type": "password"}, "dedupe_key": "fixture:auth:anomalous:success"}

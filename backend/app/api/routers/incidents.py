@@ -3,7 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -11,8 +11,6 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.schemas.errors import ErrorEnvelope
-from app.auth.dependencies import SystemUser, require_analyst, require_user, resolve_actor_id
-from app.auth.models import User
 from app.api.schemas.incidents import (
     ActionLogSummary,
     ActionSummary,
@@ -30,6 +28,8 @@ from app.api.schemas.incidents import (
     TransitionOut,
     TransitionRef,
 )
+from app.auth.dependencies import SystemUser, require_analyst, require_user, resolve_actor_id
+from app.auth.models import User
 from app.db.models import (
     Action,
     ActionLog,
@@ -140,47 +140,55 @@ async def list_incidents(
         last = incidents[-1]
         next_cursor = _encode_cursor(last.opened_at, last.id)
 
+    # Phase 19: batched aggregate fetches replace the previous per-incident
+    # N+1 (5 queries × N incidents → 250 queries on a 50-item page).
+    incident_ids = [inc.id for inc in incidents]
+    entity_counts: dict[uuid.UUID, int] = {}
+    detection_counts: dict[uuid.UUID, int] = {}
+    event_counts: dict[uuid.UUID, int] = {}
+    primary_users: dict[uuid.UUID, str | None] = {}
+    primary_hosts: dict[uuid.UUID, str | None] = {}
+
+    if incident_ids:
+        ent_rows = await db.execute(
+            select(IncidentEntity.incident_id, func.count(IncidentEntity.entity_id))
+            .where(IncidentEntity.incident_id.in_(incident_ids))
+            .group_by(IncidentEntity.incident_id)
+        )
+        entity_counts = {row[0]: row[1] for row in ent_rows.all()}
+
+        det_rows = await db.execute(
+            select(IncidentDetection.incident_id, func.count(IncidentDetection.detection_id))
+            .where(IncidentDetection.incident_id.in_(incident_ids))
+            .group_by(IncidentDetection.incident_id)
+        )
+        detection_counts = {row[0]: row[1] for row in det_rows.all()}
+
+        evt_rows = await db.execute(
+            select(IncidentEvent.incident_id, func.count(IncidentEvent.event_id))
+            .where(IncidentEvent.incident_id.in_(incident_ids))
+            .group_by(IncidentEvent.incident_id)
+        )
+        event_counts = {row[0]: row[1] for row in evt_rows.all()}
+
+        # One query for primary user + host per incident; pick the
+        # first natural_key per (incident_id, kind) pair.
+        ent_link_rows = await db.execute(
+            select(IncidentEntity.incident_id, Entity.kind, Entity.natural_key)
+            .join(Entity, IncidentEntity.entity_id == Entity.id)
+            .where(
+                IncidentEntity.incident_id.in_(incident_ids),
+                Entity.kind.in_(["user", "host"]),
+            )
+        )
+        for inc_id, kind, natural_key in ent_link_rows.all():
+            if kind == "user" and inc_id not in primary_users:
+                primary_users[inc_id] = natural_key
+            elif kind == "host" and inc_id not in primary_hosts:
+                primary_hosts[inc_id] = natural_key
+
     items: list[IncidentSummary] = []
     for inc in incidents:
-        entity_count = await db.scalar(
-            select(func.count(IncidentEntity.entity_id)).where(
-                IncidentEntity.incident_id == inc.id
-            )
-        ) or 0
-        detection_count = await db.scalar(
-            select(func.count(IncidentDetection.detection_id)).where(
-                IncidentDetection.incident_id == inc.id
-            )
-        ) or 0
-        event_count = await db.scalar(
-            select(func.count(IncidentEvent.event_id)).where(
-                IncidentEvent.incident_id == inc.id
-            )
-        ) or 0
-
-        # primary user / host from incident_entities
-        user_result = await db.execute(
-            select(Entity.natural_key)
-            .join(IncidentEntity, IncidentEntity.entity_id == Entity.id)
-            .where(
-                IncidentEntity.incident_id == inc.id,
-                Entity.kind == "user",
-            )
-            .limit(1)
-        )
-        primary_user = user_result.scalar_one_or_none()
-
-        host_result = await db.execute(
-            select(Entity.natural_key)
-            .join(IncidentEntity, IncidentEntity.entity_id == Entity.id)
-            .where(
-                IncidentEntity.incident_id == inc.id,
-                Entity.kind == "host",
-            )
-            .limit(1)
-        )
-        primary_host = host_result.scalar_one_or_none()
-
         items.append(IncidentSummary(
             id=inc.id,
             title=inc.title,
@@ -191,11 +199,11 @@ async def list_incidents(
             summary=inc.summary,
             opened_at=inc.opened_at,
             updated_at=inc.updated_at,
-            entity_count=entity_count,
-            detection_count=detection_count,
-            event_count=event_count,
-            primary_user=primary_user,
-            primary_host=primary_host,
+            entity_count=entity_counts.get(inc.id, 0),
+            detection_count=detection_counts.get(inc.id, 0),
+            event_count=event_counts.get(inc.id, 0),
+            primary_user=primary_users.get(inc.id),
+            primary_host=primary_hosts.get(inc.id),
         ))
 
     return IncidentList(items=items, next_cursor=next_cursor)
@@ -428,7 +436,7 @@ async def transition_incident(
 
     actor_id = await resolve_actor_id(current_user, db)
     from_status = inc.status
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     inc.status = body.to_status
     inc.updated_at = now
     if body.to_status == IncidentStatus.closed:
@@ -498,7 +506,7 @@ async def add_note(
         body=stripped,
         author=current_user.email,
         actor_user_id=actor_id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db.add(note)
     await db.commit()

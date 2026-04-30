@@ -55,6 +55,9 @@ services:
       CCT_AUTOSEED_DEMO: ${CCT_AUTOSEED_DEMO:-true}
     volumes:
       - ./wazuh-config/config/wazuh_indexer_ssl_certs/root-ca.pem:/etc/ssl/certs/wazuh-ca.pem:ro
+      # Phase 19: bind-mount detection-as-code fixtures so backend tests can
+      # reach them at /app/labs/fixtures regardless of build context.
+      - ../../labs:/app/labs:ro
     depends_on:
       postgres:
         condition: service_healthy

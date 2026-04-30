@@ -78,15 +78,22 @@ async def list_detections(
         last = detections[-1]
         next_cursor = _encode_cursor(last.created_at, last.id)
 
-    # Resolve incident_id for each detection via IncidentDetection join
+    # Phase 19: batched incident_id lookup replaces the previous per-detection
+    # query (1 query × N detections → up to 200 queries on a max page).
+    detection_ids = [d.id for d in detections]
+    incident_link: dict[uuid.UUID, uuid.UUID] = {}
+    if detection_ids:
+        link_rows = await db.execute(
+            select(IncidentDetection.detection_id, IncidentDetection.incident_id)
+            .where(IncidentDetection.detection_id.in_(detection_ids))
+        )
+        for det_id, inc_id in link_rows.all():
+            # First-write wins; a detection may belong to multiple incidents but
+            # the API has historically surfaced one. Preserve that contract.
+            incident_link.setdefault(det_id, inc_id)
+
     items: list[DetectionItem] = []
     for d in detections:
-        inc_result = await db.execute(
-            select(IncidentDetection.incident_id)
-            .where(IncidentDetection.detection_id == d.id)
-            .limit(1)
-        )
-        linked_incident_id = inc_result.scalar_one_or_none()
         items.append(DetectionItem(
             id=d.id,
             rule_id=d.rule_id,
@@ -97,7 +104,7 @@ async def list_detections(
             attack_tags=d.attack_tags,
             matched_fields=d.matched_fields,
             event_id=d.event_id,
-            incident_id=linked_incident_id,
+            incident_id=incident_link.get(d.id),
             created_at=d.created_at,
         ))
 

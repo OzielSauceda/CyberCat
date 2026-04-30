@@ -57,11 +57,11 @@ def _make_detector(
     pack_file: str,
 ) -> object:
     """Create and register an async detector function for one compiled Sigma rule."""
-    from app.db.models import Event
-    from app.detection.engine import DetectionResult, register
-
     import redis.asyncio as aioredis
     from sqlalchemy.ext.asyncio import AsyncSession
+
+    from app.db.models import Event
+    from app.detection.engine import DetectionResult, register
 
     severity = _LEVEL_TO_SEVERITY.get(spec.level, Severity.medium)
     confidence = _LEVEL_TO_CONFIDENCE.get(spec.level, Decimal("0.60"))

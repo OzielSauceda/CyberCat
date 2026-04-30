@@ -114,6 +114,52 @@ docker compose --profile agent build cct-agent && \
   docker compose --profile agent up -d --force-recreate cct-agent
 ```
 
+## First-run experience (Phase 17)
+
+A fresh clone (`./start.sh` against an empty Postgres volume) lands the operator on a populated welcome page with a guided tour, glossary tooltips on every domain term, and seeded demo incidents — so reviewers can see the product working without ingesting their own telemetry first. ADR-0014 records the design.
+
+### Auto-seed on first boot
+
+`CCT_AUTOSEED_DEMO=true` in `infra/compose/.env` (the dev-compose default) causes the backend to run `labs/simulator/scenarios/credential_theft_chain` on startup *iff* the `events` table is empty AND the Redis seed marker `cybercat:demo_active` is unset. Both checks are wrapped in a Postgres advisory lock so concurrent backend replicas can't race.
+
+To opt out (e.g. on a real-traffic deployment), set in `infra/compose/.env` before `./start.sh`:
+
+```ini
+CCT_AUTOSEED_DEMO=false
+```
+
+### Wipe demo data
+
+Once the operator wants a clean slate (real telemetry to come in, or smoke tests to assume an empty table), the admin-gated wipe endpoint truncates every seed-touched table in one `TRUNCATE ... CASCADE` transaction and clears the seed marker. `users` and `api_tokens` are preserved.
+
+```bash
+# AUTH_REQUIRED=false (default): no bearer needed, SystemUser passthrough.
+curl -X DELETE http://localhost:8000/v1/admin/demo-data
+# AUTH_REQUIRED=true: requires admin role.
+curl -X DELETE -H "Authorization: Bearer $CCT_ADMIN_TOKEN" \
+     http://localhost:8000/v1/admin/demo-data
+```
+
+Or click "Wipe and start fresh →" in the `DemoDataBanner` at the top of the welcome page.
+
+The current state is also queryable: `GET /v1/admin/demo-status` returns `{ "active": true|false }` based on the Redis seed marker.
+
+### Glossary, tour, and help affordances
+
+- **Glossary:** `GET /help` renders every entry from `frontend/app/lib/glossary.ts` with anchored sections. Every `<JargonTerm>` and `<PlainTerm>` tooltip has a "Read more →" link that deep-links to the matching `/help#<slug>` anchor. Adding a new domain term means adding one entry to `glossary.ts` (and, for an enum value, one entry to `frontend/app/lib/labels.ts` per Phase 18).
+- **First-run tour:** auto-fires on first visit when `localStorage["cybercat:tour:completed"]` is unset and at least one incident exists. Three steps point at the first incident card, the kill-chain panel, and the actions panel. "Skip" sets the flag.
+- **Restart the tour:** click the (?) icon in the top-right header → "Restart tour" — clears the localStorage flag and re-fires.
+
+### Smoke test
+
+```bash
+bash labs/smoke_test_phase17.sh
+```
+
+Asserts: backend healthy, auto-seed populated `events`, demo-status active=true, welcome page (`GET /`) and glossary page (`GET /help`) return 200 with expected markers, at least one seeded incident, `DELETE /v1/admin/demo-data` → 204, post-wipe `events`/`incidents` empty, seed marker cleared, `users`+`api_tokens` preserved.
+
+**Ordering note:** in any aggregate runner, run `smoke_test_phase17.sh` *first*. A broken auto-seed would poison every other smoke (they all assume control over event ingestion). Pre-existing smokes either export `CCT_AUTOSEED_DEMO=false` at start or call `DELETE /v1/admin/demo-data` before their first ingest.
+
 ## Telemetry sources (Phase 16)
 
 CyberCat ships with a custom Python sidecar agent and supports Wazuh as an optional alternative. Both produce events for the same downstream pipeline (normalizer → detection → correlation → incidents).

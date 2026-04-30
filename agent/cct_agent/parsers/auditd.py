@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Literal
 
 
@@ -208,7 +208,7 @@ def _assemble(
 
     return ParsedProcessEvent(
         kind=kind,
-        occurred_at=datetime.fromtimestamp(ts_float, tz=timezone.utc),
+        occurred_at=datetime.fromtimestamp(ts_float, tz=UTC),
         pid=pid,
         ppid=ppid,
         user=_resolve_uid(uid),

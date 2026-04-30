@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 
 from pydantic import BaseModel
 
 from app.api.schemas.incidents import ActionLogSummary, ActionSummary
 from app.enums import ActionKind, LabAssetKind
-from datetime import datetime
 
 
 class ActionProposeIn(BaseModel):

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request
@@ -70,13 +70,13 @@ async def get_current_user(
                 settings.auth_session_ttl_minutes * 60,
             )
         except (BadSignature, SignatureExpired):
-            raise HTTPException(status_code=401, detail="Session expired or invalid")
+            raise HTTPException(status_code=401, detail="Session expired or invalid") from None
 
         try:
             user_id = uuid.UUID(payload["user_id"])
             token_version = int(payload["token_version"])
         except (KeyError, ValueError):
-            raise HTTPException(status_code=401, detail="Malformed session payload")
+            raise HTTPException(status_code=401, detail="Malformed session payload") from None
 
         user = await db.get(User, user_id)
         if user is None or not user.is_active or user.token_version != token_version:
@@ -96,7 +96,7 @@ async def get_current_user(
         api_token = result.scalar_one_or_none()
         if api_token is None or not api_token.user.is_active:
             raise HTTPException(status_code=401, detail="Invalid or revoked token")
-        api_token.last_used_at = datetime.now(timezone.utc)
+        api_token.last_used_at = datetime.now(UTC)
         await db.commit()
         return api_token.user
 

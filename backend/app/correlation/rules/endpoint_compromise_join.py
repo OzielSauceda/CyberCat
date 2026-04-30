@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import redis.asyncio as aioredis
 from sqlalchemy import select
@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.correlation.engine import register
 from app.correlation.extend import extend_incident
-from app.db.models import Detection, Entity, Event, Incident, IncidentEntity, EventEntity
+from app.db.models import Detection, Entity, Event, EventEntity, Incident, IncidentEntity
 from app.enums import (
     EntityKind,
     IncidentEntityRole,
@@ -65,7 +65,7 @@ async def endpoint_compromise_join(
     # Find open identity_compromise incidents for this user within the lookback window.
     # We key only on user because the identity incident tracks user+source_ip, not yet the
     # endpoint host. The host entity gets added to the incident via extend_incident below.
-    window_start = datetime.now(timezone.utc) - timedelta(minutes=_LOOKBACK_MINUTES)
+    window_start = datetime.now(UTC) - timedelta(minutes=_LOOKBACK_MINUTES)
 
     inc_result = await db.execute(
         select(Incident)

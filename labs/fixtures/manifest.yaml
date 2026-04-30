@@ -1,0 +1,52 @@
+# Detection-as-code regression manifest (Phase 19).
+#
+# Each entry binds a JSONL fixture under labs/fixtures/ to the detector rule IDs
+# that MUST fire and MUST NOT fire when the fixture is replayed against a clean
+# stack. Adding a new detector requires adding both:
+#   - a positive fixture (proves it fires on intended input), and
+#   - at least one benign fixture in must_not_fire (proves no false-positive baseline).
+#
+# Fixture lines carry `_t_offset_sec` — the replay harness computes
+# `occurred_at = now() - _t_offset_sec` so timestamps are always recent.
+#
+# Setup: which seed actions to run before replaying. Currently supported:
+#   - block_observable: list of {value, kind} to insert into blocked_observables
+#     (used for the bad-IP beacon test).
+
+- fixture: auth/ssh_brute_force_burst.jsonl
+  must_fire: [py.auth.failed_burst]
+  must_not_fire: [py.auth.anomalous_source_success, py.process.suspicious_child, py.blocked_observable_match]
+
+- fixture: auth/successful_login_clean.jsonl
+  must_fire: []
+  must_not_fire: [py.auth.failed_burst, py.auth.anomalous_source_success]
+
+- fixture: auth/successful_login_anomalous.jsonl
+  must_fire: [py.auth.anomalous_source_success]
+  must_not_fire: [py.process.suspicious_child]
+
+- fixture: process/benign_apt_update.jsonl
+  must_fire: []
+  must_not_fire: [py.process.suspicious_child, py.blocked_observable_match]
+
+- fixture: process/encoded_powershell.jsonl
+  must_fire: [py.process.suspicious_child]
+  must_not_fire: [py.auth.failed_burst]
+
+- fixture: process/curl_pipe_sh.jsonl
+  # File still named for the original Linux-style intent; the actual canonical
+  # fixture exercises Branch 2 (office binary spawning cmd.exe) which is what
+  # the detector matches today. Rename if/when a Linux process branch is added.
+  must_fire: [py.process.suspicious_child]
+  must_not_fire: [py.auth.failed_burst]
+
+- fixture: network/benign_outbound.jsonl
+  must_fire: []
+  must_not_fire: [py.blocked_observable_match]
+
+- fixture: network/known_bad_ip_beacon.jsonl
+  setup:
+    block_observable:
+      - {value: "198.51.100.66", kind: "ip"}
+  must_fire: [py.blocked_observable_match]
+  must_not_fire: [py.auth.failed_burst, py.process.suspicious_child]

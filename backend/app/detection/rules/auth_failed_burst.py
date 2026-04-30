@@ -6,6 +6,7 @@ import redis.asyncio as aioredis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Event
+from app.db.redis_state import safe_redis
 from app.detection.engine import DetectionResult, register
 from app.enums import DetectionRuleSource, Severity
 
@@ -29,16 +30,32 @@ async def auth_failed_burst(
         return []
 
     cooldown_key = f"corr:rule_cooldown:{RULE_ID}:{user}"
-    if await redis.exists(cooldown_key):
+    in_cooldown = await safe_redis(
+        redis.exists(cooldown_key),
+        rule_id=RULE_ID, op_name="cooldown_check", default=0,
+    )
+    if in_cooldown:
         return []
 
     window_key = f"corr:auth_failures:{user}"
-    count = await redis.incr(window_key)
+    count = await safe_redis(
+        redis.incr(window_key),
+        rule_id=RULE_ID, op_name="incr_window", default=None,
+    )
+    if count is None:
+        # Redis unavailable — windowed counting is impossible, skip detection.
+        return []
     if count == 1:
-        await redis.expire(window_key, _WINDOW_SEC)
+        await safe_redis(
+            redis.expire(window_key, _WINDOW_SEC),
+            rule_id=RULE_ID, op_name="expire_window", default=None,
+        )
 
     if count >= _THRESHOLD:
-        await redis.set(cooldown_key, "1", ex=_COOLDOWN_SEC)
+        await safe_redis(
+            redis.set(cooldown_key, "1", ex=_COOLDOWN_SEC),
+            rule_id=RULE_ID, op_name="set_cooldown", default=None,
+        )
         return [DetectionResult(
             rule_id=RULE_ID,
             rule_source=DetectionRuleSource.py,

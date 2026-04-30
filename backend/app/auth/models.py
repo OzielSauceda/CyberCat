@@ -3,7 +3,6 @@ from __future__ import annotations
 import enum
 import uuid
 from datetime import datetime
-from typing import Optional
 
 import sqlalchemy as sa
 from sqlalchemy import ForeignKey, Index, text
@@ -25,8 +24,8 @@ class User(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     # email is declared as Text here; the migration creates it as CITEXT for case-insensitive uniqueness
     email: Mapped[str] = mapped_column(sa.Text, nullable=False, unique=True)
-    password_hash: Mapped[Optional[str]] = mapped_column(sa.Text, nullable=True)
-    oidc_subject: Mapped[Optional[str]] = mapped_column(sa.Text, nullable=True, unique=True)
+    password_hash: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    oidc_subject: Mapped[str | None] = mapped_column(sa.Text, nullable=True, unique=True)
     role: Mapped[UserRole] = mapped_column(
         sa.Enum(UserRole, name="user_role", create_type=False),
         nullable=False,
@@ -60,11 +59,11 @@ class ApiToken(Base):
     name: Mapped[str] = mapped_column(sa.Text, nullable=False)
     # sha256 digest of the plaintext token; only this value is ever persisted
     token_hash: Mapped[bytes] = mapped_column(sa.LargeBinary, nullable=False, unique=True)
-    last_used_at: Mapped[Optional[datetime]] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    last_used_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
-    revoked_at: Mapped[Optional[datetime]] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
 
     user: Mapped[User] = relationship("User", back_populates="api_tokens")
 

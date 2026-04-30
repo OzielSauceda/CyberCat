@@ -1,0 +1,1 @@
+{"_t_offset_sec": 30, "source": "direct", "kind": "process.created", "raw": {}, "normalized": {"host": "lab-debian", "user": "alice", "pid": 9001, "ppid": 4321, "image": "cmd.exe", "cmdline": "cmd.exe /c whoami", "parent_image": "winword.exe"}, "dedupe_key": "fixture:proc:office_shell:1"}

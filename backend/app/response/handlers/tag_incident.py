@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,7 +19,7 @@ async def execute(action: Action, db: AsyncSession) -> tuple[ActionResult, str |
     if tag not in current:
         current.append(tag)
         inc.tags = current
-        inc.updated_at = datetime.now(timezone.utc)
+        inc.updated_at = datetime.now(UTC)
     return ActionResult.ok, None, {"removed_tag": tag}
 
 
@@ -31,5 +31,5 @@ async def revert(action: Action, log: ActionLog, db: AsyncSession) -> tuple[Acti
     if inc is None:
         return ActionResult.fail, "incident not found", None
     inc.tags = [t for t in (inc.tags or []) if t != removed_tag]
-    inc.updated_at = datetime.now(timezone.utc)
+    inc.updated_at = datetime.now(UTC)
     return ActionResult.ok, None, None

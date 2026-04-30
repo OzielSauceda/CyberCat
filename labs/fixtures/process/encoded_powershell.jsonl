@@ -1,0 +1,1 @@
+{"_t_offset_sec": 30, "source": "direct", "kind": "process.created", "raw": {}, "normalized": {"host": "lab-debian", "user": "alice", "pid": 4242, "ppid": 1234, "image": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "cmdline": "powershell.exe -EncodedCommand SQBuAHYAbwBrAGUALQBXAGUAYgBSAGUAcQB1AGUAcwB0AA=="}, "dedupe_key": "fixture:proc:encoded_ps:1"}

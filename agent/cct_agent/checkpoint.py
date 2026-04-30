@@ -29,7 +29,7 @@ class Checkpoint:
     offset: int = 0
 
     @classmethod
-    def load(cls, path: Path) -> "Checkpoint":
+    def load(cls, path: Path) -> Checkpoint:
         """Read the on-disk checkpoint, or return a fresh one (offset=0)."""
         if not path.exists():
             return cls(path=path)

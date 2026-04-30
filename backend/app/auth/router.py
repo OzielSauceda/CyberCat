@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.dependencies import CurrentUser, SystemUser, require_admin, require_user
+from app.auth.dependencies import CurrentUser, SystemUser, require_admin
 from app.auth.models import ApiToken, User, UserRole
 from app.auth.oidc import (
     _OIDC_STATE_COOKIE,
@@ -20,7 +20,7 @@ from app.auth.oidc import (
     upsert_oidc_user,
     verify_state,
 )
-from app.auth.security import generate_token, hash_password, sign_session, verify_password
+from app.auth.security import generate_token, sign_session, verify_password
 from app.config import settings
 from app.db.session import get_db
 
@@ -207,7 +207,7 @@ async def revoke_token(
             raise HTTPException(status_code=403, detail="Cannot revoke another user's token")
     if api_token.revoked_at is not None:
         raise HTTPException(status_code=409, detail="Token already revoked")
-    api_token.revoked_at = datetime.now(timezone.utc)
+    api_token.revoked_at = datetime.now(UTC)
     await db.commit()
 
 

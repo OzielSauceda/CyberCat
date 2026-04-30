@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncGenerator
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 import app.correlation  # noqa: F401 — registers all correlators
 import app.detection  # noqa: F401 — registers all detectors
+from app.api.admin import router as admin_router
 from app.api.routers import attack as attack_router
 from app.api.routers import blocked_observables as blocked_observables_router
 from app.api.routers import detections as detections_router
@@ -22,7 +24,6 @@ from app.api.routers import lab_assets as lab_assets_router
 from app.api.routers import responses as responses_router
 from app.api.routers import streaming as streaming_router
 from app.api.routers import wazuh as wazuh_router
-from app.api.admin import router as admin_router
 from app.auth.oidc import discover_oidc
 from app.auth.router import router as auth_router
 from app.config import settings
@@ -35,6 +36,12 @@ from app.streaming.bus import close_bus, init_bus
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    # Phase 19 A1.1: bump asyncio's default thread executor so concurrent
+    # getaddrinfo() calls during a Redis/Wazuh outage don't queue up. Python's
+    # default is min(32, cpu_count + 4); on a 4-core lab box that's 8, which is
+    # exhausted by a few simultaneous DNS lookups (each ~3.6s on NXDOMAIN).
+    loop = asyncio.get_running_loop()
+    loop.set_default_executor(ThreadPoolExecutor(max_workers=64))
     await init_redis()
     await init_bus()
     app.state.oidc = await discover_oidc()
@@ -49,7 +56,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     if poller_task is not None:
         try:
             await asyncio.wait_for(poller_task, timeout=10)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             poller_task.cancel()
     await close_bus()
     await close_redis()

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,7 +32,7 @@ async def execute(action: Action, db: AsyncSession) -> tuple[ActionResult, str |
     if asset is None:
         return ActionResult.fail, f"host {host!r} not found in lab_assets", None
 
-    killed_at = datetime.now(timezone.utc).isoformat()
+    killed_at = datetime.now(UTC).isoformat()
 
     # Annotate process entity if present in the entity graph
     process_entity = await db.scalar(

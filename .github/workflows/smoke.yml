@@ -1,0 +1,65 @@
+name: Smoke
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    # 06:00 UTC daily — early in the morning EU, late evening US
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: docker-compose smoke chain
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Bring up default-profile stack
+        run: |
+          cd infra/compose
+          docker compose up -d --wait postgres redis backend frontend
+          # Give the backend a generous window to finish first-boot migrations + auto-seed
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:8000/v1/incidents > /dev/null 2>&1; then
+              echo "backend ready"
+              break
+            fi
+            sleep 2
+          done
+
+      - name: Run Phase 17 smoke first (auto-seed contract)
+        run: bash labs/smoke_test_phase17.sh
+
+      - name: Run remaining default-profile smoke tests
+        # Wazuh-only smokes (phase8, phase11) need --profile wazuh and are excluded.
+        run: |
+          set -e
+          for script in \
+            labs/smoke_test_phase10.sh \
+            labs/smoke_test_phase9a.sh \
+            labs/smoke_test_phase15.sh \
+            labs/smoke_test_phase16_9.sh \
+            labs/smoke_test_phase16_10.sh \
+            labs/smoke_test_agent.sh; do
+            echo "::group::$(basename "$script")"
+            bash "$script"
+            echo "::endgroup::"
+          done
+
+      - name: Capture backend logs on failure
+        if: failure()
+        run: |
+          cd infra/compose
+          docker compose logs backend --tail 200
+
+      - name: Tear down
+        if: always()
+        run: |
+          cd infra/compose
+          docker compose down -v

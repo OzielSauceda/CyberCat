@@ -1,0 +1,178 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: backend (lint + tests)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: cybercat
+          POSTGRES_PASSWORD: cybercat_dev
+          POSTGRES_DB: cybercat
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U cybercat"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql+asyncpg://cybercat:cybercat_dev@localhost:5432/cybercat
+      REDIS_URL: redis://localhost:6379/0
+      AUTH_REQUIRED: "false"
+      WAZUH_BRIDGE_ENABLED: "false"
+      WAZUH_AR_ENABLED: "false"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install backend deps
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run alembic migrations
+        working-directory: backend
+        run: alembic upgrade head
+
+      - name: Ruff lint
+        working-directory: backend
+        run: ruff check app/
+
+      - name: Pytest (backend)
+        working-directory: backend
+        run: |
+          set -o pipefail
+          pytest tests/ -v --tb=long -ra 2>&1 | tee pytest-backend.log
+
+      - name: Surface backend failure detail as annotations
+        if: failure()
+        working-directory: backend
+        run: |
+          if [ ! -f pytest-backend.log ]; then
+            echo "::error::no pytest log produced"
+            exit 0
+          fi
+          grep -nE "^(FAILED|ERROR|E   |>   |_+ .+ _+|tests/.+::|=+ short test summary|=+ [0-9]+ (failed|passed|error))" pytest-backend.log \
+            | tail -80 \
+            | while IFS= read -r line; do
+                clean=$(printf '%s' "$line" | tr -d '\r' | sed 's/%/%25/g; s/\r/%0D/g; s/\n/%0A/g')
+                echo "::error::$clean"
+              done
+
+  agent:
+    name: agent (lint + tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install agent deps
+        working-directory: agent
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Ruff lint
+        working-directory: agent
+        run: ruff check cct_agent/
+
+      - name: Pytest (agent)
+        working-directory: agent
+        # Skip cross-project tests that depend on the backend package being importable.
+        run: |
+          set -o pipefail
+          pytest tests/ \
+            --ignore=tests/test_events_network.py \
+            --ignore=tests/test_events_process.py \
+            -v --tb=long -ra 2>&1 | tee pytest-agent.log
+
+      - name: Surface pytest output to run summary
+        if: always()
+        working-directory: agent
+        run: |
+          {
+            echo '## Agent pytest output (last 300 lines)'
+            echo '```'
+            tail -300 pytest-agent.log 2>/dev/null || echo "(no log captured)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Surface failure detail as annotations
+        if: failure()
+        working-directory: agent
+        run: |
+          # Workflow ::error:: annotations are publicly visible via the
+          # check-runs annotations API. Stuff the failure context into
+          # one annotation per line so we can read it without log access.
+          if [ ! -f pytest-agent.log ]; then
+            echo "::error::no pytest log produced"
+            exit 0
+          fi
+          # Lines covering FAILED / ERROR / Traceback / assertion / final summary.
+          grep -nE "^(FAILED|ERROR|E   |>   |_+ .+ _+|tests/.+::|=+ short test summary|=+ [0-9]+ (failed|passed|error))" pytest-agent.log \
+            | tail -80 \
+            | while IFS= read -r line; do
+                # Strip control chars and colons that confuse the workflow command parser.
+                clean=$(printf '%s' "$line" | tr -d '\r' | sed 's/%/%25/g; s/\r/%0D/g; s/\n/%0A/g')
+                echo "::error::$clean"
+              done
+
+  frontend:
+    name: frontend (typecheck + build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        working-directory: frontend
+        run: npm ci
+
+      - name: Typecheck
+        working-directory: frontend
+        run: npx tsc --noEmit
+
+      - name: Build
+        working-directory: frontend
+        run: npm run build
+        env:
+          # Avoid Next.js telemetry calls during CI
+          NEXT_TELEMETRY_DISABLED: "1"

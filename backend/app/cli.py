@@ -15,6 +15,7 @@ import argparse
 import asyncio
 import sys
 import uuid
+from datetime import UTC
 
 from sqlalchemy import select
 
@@ -81,7 +82,7 @@ async def _issue_token(email: str, name: str) -> None:
 
 
 async def _revoke_token(token_id_str: str) -> None:
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     tid = uuid.UUID(token_id_str)
     async with AsyncSessionLocal() as db:
@@ -92,7 +93,7 @@ async def _revoke_token(token_id_str: str) -> None:
         if token.revoked_at is not None:
             print(f"Token already revoked at {token.revoked_at}.")
             return
-        token.revoked_at = datetime.now(timezone.utc)
+        token.revoked_at = datetime.now(UTC)
         await db.commit()
         print(f"Token {token_id_str} revoked.")
 

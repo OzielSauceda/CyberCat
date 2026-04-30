@@ -2,13 +2,24 @@
 
 Living status document. Update as reality changes. Short, current, honest.
 
-Last updated: 2026-04-29 — **Phase 18 ✅ SHIPPED (PR #3 merged to main).** Site-wide plain-language rewrite + redesigned kill-chain ("The route" — stamped stations + "HERE" pulse) and incident timeline ("The reel" — per-layer lanes, playhead sweep, red-string entity threads). New `frontend/app/lib/labels.ts` + `PlainTerm` component, new `lib/timelineLayout.ts` helper, extended glossary, dashboard/incidents/detail/detections/actions/help all rewritten so non-experts can read the UI without a dictionary. Backend gained `Incident.summary` (Alembic 0008) populated by all three correlator rules + the recommendations engine. Backend tests 174/174 pass (added `test_summary_jargon.py`); frontend typecheck clean; Phase 15 smoke 19/19 pass. Phase 17.8 docs/renumber still outstanding from prior phase.
+Last updated: 2026-04-30 (evening) — **Phase 19 NOT YET SHIP-READY.** Code work for A1–A7, B, C, D done on disk. **233 backend tests + 101/101 smoke pass**, but heavy-hitting verification surfaced two real gaps that the unit tests missed:
+
+- **A1.1 (follow-up needed):** When Redis is killed (container removed), DNS lookups for `redis` start failing slowly (~5s each). Cumulative latency on a single ingest request exceeds the simulator's default httpx timeout — events that complete still land in Postgres correctly, but client-visible latency spikes severely. Fix: explicit `socket_connect_timeout` + `socket_timeout` on the redis client; wire `safe_redis` into the streaming publisher.
+- **A3.1 (follow-up needed):** The `with_ingest_retry` helper is wired only into the Wazuh poller path. The HTTP ingest path (`POST /v1/events/raw`) has no retry. Real-world result: postgres restart mid-load → 0/1992 events accepted, 134s to drain pending requests. Fix: wire retry into the HTTP ingest path or add a request-level middleware that retries once on `connection_invalidated`.
+
+**Test posture:** 233 backend pytest + 101/101 smoke + 1 baseline simulator run all green. Heavy-hitting chaos run = 2 of 8 scenarios green, 2 red, 2 blocked by sandbox (kill-redis was reluctantly authorized once, kill-backend not attempted), 2 non-destructive done. Detail: `docs/phase-19-plan.md` § "Heavy-hitting verification".
+
+**Nothing is committed.** All Phase 19 changes are uncommitted on the `phase-18-docs` branch. Handoff for next session: `docs/phase-19-handoff.md`.
+
+Last updated: 2026-04-30 (afternoon) — **Phase 19 code complete on disk** (premature claim — see evening update above).
+
+Last updated: 2026-04-29 — **Phase 17 ✅ FULLY SHIPPED (incl. 17.8 docs/ADR/smoke).** Phase 17.8 closed today: `docs/decisions/ADR-0014-frontend-detective-redesign.md` written, `labs/smoke_test_phase17.sh` written, `docs/runbook.md` "First-run experience (Phase 17)" section added, `Project Brief.md` frontend-identity postscript added, `CyberCat-Explained.md` §8 + §15 refreshed. Phase 17 spot-fix aesthetic pass for 17.2/17.3 surfaces verified resolved (likely absorbed by Phase 18.8 work). **Phase 18 ✅ SHIPPED (PR #3 merged to main).** Site-wide plain-language rewrite + redesigned kill-chain ("The route" — stamped stations + "HERE" pulse) and incident timeline ("The reel" — per-layer lanes, playhead sweep, red-string entity threads). New `frontend/app/lib/labels.ts` + `PlainTerm` component, new `lib/timelineLayout.ts` helper, extended glossary, dashboard/incidents/detail/detections/actions/help all rewritten so non-experts can read the UI without a dictionary. Backend gained `Incident.summary` (Alembic 0008) populated by all three correlator rules + the recommendations engine. Backend tests 174/174 pass (added `test_summary_jargon.py`); frontend typecheck clean; Phase 15 smoke 19/19 pass.
 
 ---
 
 ## Status summary
 
-**Phase:** Phase 18 ✅ SHIPPED 2026-04-29 (merged to main via PR #3). Phase 17 🔄 IN PROGRESS — sub-phases 17.1–17.7 code complete (typecheck clean), spot-fix pass + 17.8 docs/renumber remaining. Phase 16.10 ✅ FULLY VERIFIED 2026-04-28. Phase 16.9 ✅ FULLY VERIFIED. Phase 16 ✅ FULLY VERIFIED. Phase 15 ✅ FULLY VERIFIED.
+**Phase:** Phase 18 ✅ SHIPPED 2026-04-29 (merged to main via PR #3). Phase 17 ✅ FULLY SHIPPED 2026-04-29 (17.1–17.7 code-complete prior, 17.8 docs/ADR/smoke landed today). Phase 16.10 ✅ FULLY VERIFIED 2026-04-28. Phase 16.9 ✅ FULLY VERIFIED. Phase 16 ✅ FULLY VERIFIED. Phase 15 ✅ FULLY VERIFIED.
 
 **Overall posture (honest):**
 
@@ -24,16 +35,32 @@ Last updated: 2026-04-29 — **Phase 18 ✅ SHIPPED (PR #3 merged to main).** Si
 
 ## What needs to happen next session (pick up here)
 
-**Phase 18 is shipped to main.** Phase 17 still has open items.
+**Phases 17 and 18 are now both fully shipped.** No outstanding items on the redesign track.
 
-1. **Phase 17 spot-fix aesthetic pass (use `frontend-design` skill)** — Sub-phases 17.2 (NavBar, HelpMenu, CaseBoard, badge components in layout) and 17.3 (welcome `page.tsx`) were built without the `frontend-design` skill. Card bodies and panel interiors fall back to generic zinc (`bg-zinc-900/50`, `bg-zinc-800`) rather than the full dossier warm-paper palette. Invoke `frontend-design:frontend-design` skill, then spot-fix those specific surfaces. *Note:* the surfaces Phase 18 touched (dashboard, incident detail panels, badges) were rebuilt with the skill in 18.8 and don't need this pass.
+**Verified 2026-04-29:**
+- **Phase 17 spot-fix aesthetic pass — RESOLVED.** Verification of the surfaces called out in this section (NavBar, HelpMenu, CaseBoard, badge components in layout, welcome `page.tsx`) confirmed they are now fully on dossier tokens (`bg-dossier-stamp`, `border-dossier-paperEdge`, `text-dossier-ink`, `dossier-evidenceTape`); no `bg-zinc-900/50` fallback remains. Most likely repainted during Phase 18.8 work after `frontend-design` was invoked. Other files in the tree still reference zinc (login page, Skeleton, ConfidenceBar, some incident-detail panels) but those are not the Phase 17.2/17.3 surfaces this note was about.
+- **Phase 17.8 — DONE.** `docs/decisions/ADR-0014-frontend-detective-redesign.md` written. `labs/smoke_test_phase17.sh` written. `docs/runbook.md` "First-run experience (Phase 17)" section added. `Project Brief.md` postscript on case-file frontend identity added. `CyberCat-Explained.md` §8 expanded with frontend identity / first-run / glossary / plain-language / auto-seed sub-sections; §15 updated with Phase 15–18 entries. The renumber line in the original 17.8 plan was correctly dropped (Phase 18 became the plain-language rewrite, not the Go rewrite).
 
-2. **Phase 17.8 — Docs, ADR, smoke test** — See `docs/phase-17-plan.md §17.8`. Key items: write `ADR-0014-frontend-detective-redesign.md`, update `Project Brief.md` + `CyberCat-Explained.md`, write `labs/smoke_test_phase17.sh`. The renumber line in the original 17.8 plan is now obsolete (Phase 18 is the plain-language rewrite, not the Go rewrite — see Phase 18 section below).
+**Phase 19 (in progress)** — Hardening, error-proofing, CI/CD, detection-as-code. Plan: `docs/phase-19-plan.md`. Workstreams complete:
+- A1 Redis graceful degradation (detectors fail-safe; ingest survives Redis outage)
+- A2 Wazuh poller circuit-breaker (10 consecutive ingest failures → abort batch, no cursor advance)
+- A3 Postgres pool config (`pool_size=20, max_overflow=10, pool_recycle=1800, pool_timeout=10`) + ingest retry on connection_invalidated
+- A4 Event ingest validation (raw ≤ 64KB, normalized ≤ 16KB, occurred_at within [now-30d, now+5m], dedupe_key printable-ASCII)
+- A5 SSE bus supervisor (auto-reconnect on Redis pub/sub crash, 2s backoff)
+- A6 Load harness shipped at `labs/perf/load_harness.py` (acceptance check + JSON summary)
+- A7 N+1 elimination on `GET /v1/incidents` (250 → ≤ 12 queries) and `GET /v1/detections` (200 → ≤ 10)
+- B Quality bar: ruff config + clean (backend + agent), pytest-randomly added (3 random seeds × 233 tests all green)
+- C CI: `.github/workflows/ci.yml` + `smoke.yml`; minimal README with badges
+- D Detection-as-code: `labs/fixtures/` (8 fixtures + manifest + replay) + `test_detection_fixtures.py` (10 cases)
+
+**Phase 19 verification deferred to first push:** CI green-on-push proof, smoke.yml run on main, manual `docker compose kill redis` end-to-end test, `v0.9` git tag.
 
 **Future / optional phases (renumbered to reflect reality):**
-- **Phase 19 (optional)** — Go rewrite of the agent's hot path (was originally pencilled as Phase 17, then 18; bumped because the slot was taken).
-- **Phase 20 (optional)** — Token rotation + multi-source dedup.
+- **Phase 19.5** — Chaos testing (kill Redis / restart Postgres / network-partition agent / OOM-kill backend mid-correlation). See `docs/phase-19-plan.md` cross-reference.
+- **Phase 20** — Heavy-hitter choreographed scenarios (`lateral_movement_chain`, `crypto_mining_payload`, `webshell_drop`, `ransomware_staging`, `cloud_token_theft_lite`) + operator drills + merge/split incidents.
+- **Phase 21** — Caldera adversary emulation + coverage scorecard.
 - **Ship-story phase** — README rewrite, demo GIF, public repo prep. Plan at `C:\Users\oziel\.claude\plans\project-state-md-ok-now-that-hashed-allen.md`.
+- **Optional separate** — Go rewrite of the agent's hot path; token rotation + multi-source dedup.
 
 **Wazuh code deletion is NOT on the roadmap.** It stays as a working alternative source indefinitely.
 
@@ -82,9 +109,11 @@ Last updated: 2026-04-29 — **Phase 18 ✅ SHIPPED (PR #3 merged to main).** Si
 
 ---
 
-### Phase 17 — 🔄 IN PROGRESS — Detective Console: Frontend Redesign
+### Phase 17 — ✅ FULLY SHIPPED 2026-04-29 — Detective Console: Frontend Redesign
 
 **Plan:** `docs/phase-17-plan.md`
+**ADR:** `docs/decisions/ADR-0014-frontend-detective-redesign.md`
+**Smoke:** `labs/smoke_test_phase17.sh`
 
 **What Phase 17 does:** Redesigns the frontend around a "detective / case-file" motif. New visual language (dossier tokens), welcome landing page, glossary + JargonTerm tooltip system, first-run guided tour, auto-seed demo data on first boot, and full case-file restyle of working views.
 
@@ -92,19 +121,19 @@ Last updated: 2026-04-29 — **Phase 18 ✅ SHIPPED (PR #3 merged to main).** Si
 
 - **17.1 — Design system foundation ✅ 2026-04-28** — `tailwind.config.ts` extended with `dossier.*` color tokens, `font-case`, `shadow-dossier`, `bg-foldermark`. `frontend/app/lib/theme-tokens.ts` created. `globals.css` imports Special Elite font via `next/font/google`. Deps added: `framer-motion`, `@radix-ui/react-tooltip`, `@radix-ui/react-dialog`, `@radix-ui/react-popover`, `@radix-ui/react-dropdown-menu`.
 
-- **17.2 — Case-file shell ✅ 2026-04-28** — `layout.tsx` rebuilt with dossier nav. New components: `NavBar.tsx` (icon+tooltip links), `HelpMenu.tsx` (Radix Popover), `CaseBoard.tsx` (left-accent wrapper). `StreamStatusBadge`, `UserBadge`, `WazuhBridgeBadge` restyled. ⚠ Built without `frontend-design` skill — card/panel bodies use generic zinc; spot-fix queued.
+- **17.2 — Case-file shell ✅ 2026-04-28** — `layout.tsx` rebuilt with dossier nav. New components: `NavBar.tsx` (icon+tooltip links), `HelpMenu.tsx` (Radix Popover), `CaseBoard.tsx` (left-accent wrapper). `StreamStatusBadge`, `UserBadge`, `WazuhBridgeBadge` restyled. *(Originally built without `frontend-design` skill; spot-fix verified resolved 2026-04-29 — surfaces now fully on dossier tokens, likely repainted during 18.8.)*
 
-- **17.3 — Welcome landing page ✅ 2026-04-28** — `frontend/app/page.tsx` fully rewritten. Sections: header strip, "What CyberCat does / isn't / flow" cards, Get Started cards, Live Status, first-time user CTA + tour trigger. ⚠ Built without `frontend-design` skill — info cards use `bg-zinc-900/50`; spot-fix queued.
+- **17.3 — Welcome landing page ✅ 2026-04-28** — `frontend/app/page.tsx` fully rewritten. Sections: header strip, "What CyberCat does / isn't / flow" cards, Get Started cards, Live Status, first-time user CTA + tour trigger. *(Originally built without `frontend-design` skill; spot-fix verified resolved 2026-04-29 — `bg-zinc-900/50` fallback gone, on full dossier palette.)*
 
 - **17.4 — Glossary system ✅ 2026-04-28** — `frontend/app/lib/glossary.ts` (~30 terms), `JargonTerm.tsx` (dotted-underline Radix Tooltip), `frontend/app/help/page.tsx` (full glossary with anchors). `<JargonTerm>` applied across incidents, detections, actions, entities pages.
 
 - **17.5 — First-run guided tour ✅ 2026-04-28** — `FirstRunTour.tsx` — 3-step Radix Dialog overlay with framer-motion highlight ring. `localStorage` flag prevents auto-replay; HelpMenu exposes "Restart tour".
 
-- **17.6 — Auto-seed demo data ✅ 2026-04-28** — `backend/app/main.py` startup hook (`CCT_AUTOSEED_DEMO`), advisory lock + `seed_marker`. `backend/app/api/admin.py` — `DELETE /v1/admin/demo-data` (TRUNCATE CASCADE). `DemoDataBanner.tsx` frontend banner. `.env.example` + `docker-compose.yml` wired.
+- **17.6 — Auto-seed demo data ✅ 2026-04-28** — `backend/app/main.py` startup hook (`CCT_AUTOSEED_DEMO`), advisory lock + `seed_marker`. `backend/app/api/admin.py` — `DELETE /v1/admin/demo-data` (TRUNCATE CASCADE) + `GET /v1/admin/demo-status`. `DemoDataBanner.tsx` frontend banner. `.env.example` + `docker-compose.yml` wired.
 
-- **17.7 — Case-file restyle of working views ✅ 2026-04-28** — All primitive components restyled to dossier tokens (`SeverityBadge` stamp look, `StatusPill` uppercase tracking, `Panel` warm dark bg, `EmptyState` case-file copy). Viz panels get legends (`AttackKillChainPanel` R/C legend, `IncidentTimelineViz` header dossier-restyled, `EntityGraphPanel` entity kind legend). Incident list → dossier rows (case #, severity stamp, evidence strip). Incident detail → case header with "CASE FILE · #ID" crown + timestamp strip + "Summary of Findings" inset. `tsc --noEmit` → **0 errors**. ⚠ Built without `frontend-design` skill — see spot-fix note in "What needs to happen next session".
+- **17.7 — Case-file restyle of working views ✅ 2026-04-28** — All primitive components restyled to dossier tokens (`SeverityBadge` stamp look, `StatusPill` uppercase tracking, `Panel` warm dark bg, `EmptyState` case-file copy). Viz panels get legends (`AttackKillChainPanel` R/C legend, `IncidentTimelineViz` header dossier-restyled, `EntityGraphPanel` entity kind legend). Incident list → dossier rows (case #, severity stamp, evidence strip). Incident detail → case header with "CASE FILE · #ID" crown + timestamp strip + "Summary of Findings" inset. `tsc --noEmit` → **0 errors**.
 
-- **17.8 — Docs, ADR, smoke test, renumber ⏳ NOT STARTED** — ADR-0014, runbook update, Project Brief + CyberCat-Explained updates, PROJECT_STATE.md phase renumber (Go rewrite → 18, token rotation → 19), `labs/smoke_test_phase17.sh`.
+- **17.8 — Docs, ADR, smoke test ✅ 2026-04-29** — `docs/decisions/ADR-0014-frontend-detective-redesign.md` written (six durable decisions: case-file aesthetic, dependency budget, glossary architecture, first-run tour, auto-seed contract, smoke ordering). `labs/smoke_test_phase17.sh` written (asserts: backend healthy, auto-seed populated `events`, `demo-status` active=true + Redis seed marker set, welcome page + glossary page return 200 with markers, ≥1 seeded incident, `DELETE /v1/admin/demo-data` → 204, post-wipe events/incidents empty + seed marker cleared, `users`+`api_tokens` preserved). `docs/runbook.md` "First-run experience (Phase 17)" section added. `Project Brief.md` postscript on frontend identity added. `CyberCat-Explained.md` §8 expanded with frontend identity / first-run / glossary / plain-language / auto-seed sub-sections; §15 refreshed with Phase 15–18 entries. The renumber line in the original 17.8 plan was correctly dropped (Phase 18 became the plain-language rewrite, not the Go rewrite — see Phase 18 section).
 
 ---
 

@@ -542,4 +542,24 @@ I want the output structured like this:
 
 After you give me that plan, wait for my approval before implementing major feature code.
 
+---
+
+## **Postscript — frontend identity (added 2026-04-29, Phase 17)**
+
+The vision above is silent on the frontend's *visual identity*. After Phases 1–16.10 shipped the analyst surface in a competent but anonymous zinc dark theme, Phase 17 made an explicit identity decision so the product reads as deliberate, not generic:
+
+The frontend uses a **detective / case-file dossier** aesthetic across every working view. Working pages are framed as "dossiers" (case header with case number, opened/updated stamps, rationale becomes a "summary of findings" inset, severity becomes a stamp impression); the app frame is the "case board" (top-nav with icon + tooltip per link, header help (?) Popover, dossier-edge frame on every page). A small typewriter/case-header font (Special Elite via `next/font/google`) carries the motif on stamps and headers; warm-paper dossier color tokens (`dossier.paper`, `dossier.paperEdge`, `dossier.ink`, `dossier.evidenceTape`, `dossier.stamp`, `dossier.redaction`) replaced raw zinc; IBM Plex Mono is preserved for IDs and code.
+
+Phase 17 also shipped the **first-run experience** required to make a stranger productive on `./start.sh`: a welcome landing page at `/`, a guided 3-step tour, a typed glossary at `/help` with hover tooltips on every domain term (`<JargonTerm>`), and an auto-seed contract (env flag + Postgres advisory lock + Redis seed marker) so a fresh-volume cold-start always lands on populated demo data with a "wipe and start fresh" affordance.
+
+Phase 18 then layered a site-wide plain-language pass on top of this aesthetic: `frontend/app/lib/labels.ts` (single source of truth for enum-to-friendly-label mappings), `<PlainTerm>` (plain primary + muted technical inline + tooltip), and an `incident.summary` column populated by every correlator rule so the UI leads with plain language while the technical `rationale` stays one expander away. CLAUDE.md §2 explainability is preserved.
+
+Authority for these decisions:
+- `docs/decisions/ADR-0014-frontend-detective-redesign.md` — case-file aesthetic, dependency budget, glossary architecture, first-run tour, auto-seed contract.
+- `docs/runbook.md` — "First-run experience (Phase 17)" section.
+- `CyberCat-Explained.md` §8/§9/§15 — feature-level explanation.
+- `PROJECT_STATE.md` Phase 17 / Phase 18 entries.
+
+Everything in the original brief above (defensive scope, Postgres-truth / Redis-ephemeral, custom application layer is the star, Wazuh as upstream telemetry, laptop-safe stack, no heavyweight infra) is unchanged. The case-file frontend identity is additive — it gives the product a face, it does not redirect the platform.
+
  
