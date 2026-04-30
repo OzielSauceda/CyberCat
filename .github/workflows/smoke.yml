@@ -3,6 +3,15 @@ name: Smoke
 on:
   push:
     branches: [main]
+  pull_request:
+    # Only fire on PRs that actually touch the smoke surface, so we can
+    # validate workflow / compose / smoke-script / start.sh changes
+    # before they merge — without paying full smoke cost on every PR.
+    paths:
+      - .github/workflows/smoke.yml
+      - infra/compose/**
+      - labs/smoke_test_*.sh
+      - start.sh
   schedule:
     # 06:00 UTC daily — early in the morning EU, late evening US
     - cron: "0 6 * * *"
