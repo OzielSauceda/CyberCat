@@ -104,9 +104,25 @@ After Phase 19 closes, the next phase per the roadmap is **Phase 19.5 (chaos tes
 **Future / optional phases (renumbered to reflect reality):**
 - **Phase 19.5** — Chaos testing (kill Redis / restart Postgres / network-partition agent / OOM-kill backend mid-correlation). See `docs/phase-19-plan.md` cross-reference.
 - **Phase 20** — Heavy-hitter choreographed scenarios (`lateral_movement_chain`, `crypto_mining_payload`, `webshell_drop`, `ransomware_staging`, `cloud_token_theft_lite`) + operator drills + merge/split incidents.
-- **Phase 21** — Caldera adversary emulation + coverage scorecard.
+- **Phase 21** — Caldera adversary emulation + coverage scorecard. Headline artifact: a markdown coverage scorecard from MITRE's autonomous adversary emulator showing "techniques attempted vs. techniques detected" with detection latencies and missed-technique listings.
+- **Phase 22 — Living off the Land (LotL) detection** *(planned, detailed design deferred to post-Phase-21 coverage data — agreed 2026-04-30)*
+  - **Thesis:** detect attacker *intent through behavior chains*, not tool names. Modern Linux intrusions (~79% in early 2026) use legitimate pre-installed tools — bash, ssh, curl, python, base64, wget. Distinguishing "alice running maintenance" from "attacker pretending to be alice" requires looking at the *sequence* and *context* of commands, not the binaries themselves.
+  - **Builds on:** existing `py.process.suspicious_child` detector (already does primitive parent→child chain detection — sshd→bash→curl|sh, encoded PowerShell). Extends with: command-line argument analysis (curl flags, base64 strings, suspicious target paths), session-window sequence pattern matching (e.g., login → cd /tmp → wget → chmod +x → execute), per-user/per-host normal-tool-usage profiles, command frequency baselines.
+  - **Goal:** turn the project's one-line answer to "what's different here" from "architecture and UX" into *"we detect intent through behavior chains, with a coverage scorecard from MITRE Caldera proving it works."* This becomes the project's stated detection thesis and the headline differentiator beyond the existing platform shape.
+  - **Scoping discipline:** detectors built in this phase are *targeted at the techniques Caldera missed in Phase 21*, not abstract gap-list browsing. Stays rule-based + statistical — **no ML** (high false-positive rates in detection contexts; statistical methods give 80% of value at 5% of cost). Detailed design intentionally deferred until Phase 21 coverage data exists, so each detector is informed by data rather than guessing.
+  - **Cost estimate:** ~50–200 MB incremental RAM in the existing backend container; no new services; $0 money cost.
+  - **Effort:** ~2–3 weeks focused.
+- **Phase 23 — Slow-and-low behavioral baselining (UEBA-lite)** *(planned, follows Phase 22 — agreed 2026-04-30)*
+  - **Thesis:** catch attackers who use "slow-and-low" techniques — small actions over weeks designed to blend into normal system behavior and evade detection windows that watch for sudden noisy spikes. This is what the UEBA (User and Entity Behavior Analytics) product category exists for.
+  - **Builds on:** Phase 22's LotL behavior-chain definitions (those *are* the "what counts as normal" baseline). Extends correlator window from minutes to weeks. Per-user / per-host / per-entity baselines stored in Postgres, recomputed periodically (every 6–24h). Drift detection at event time using statistical methods (z-score, EWMA, percentile-based anomaly).
+  - **Goal:** demonstrate the platform handles long-horizon attacker patterns, not just burst-style ones. Pairs with Phase 22 for a complete behavioral-detection story — short-window chains *and* long-window drift.
+  - **Scoping discipline:** **no ML — z-scores and EWMA give 80% of the value at 5% of the cost.** Production SIEMs lean on statistical methods for the same reason. Avoid TensorFlow / PyTorch / deep learning entirely; if any algorithmic detection is needed beyond pure stats, scikit-learn Isolation Forest is the ceiling.
+  - **Cost estimate:** ~100–300 MB incremental RAM (baseline tables in Postgres + brief CPU spikes during recompute jobs); no new services; $0 money cost.
+  - **Effort:** ~2 weeks focused.
 - **Ship-story phase** — README rewrite, demo GIF, public repo prep. Plan at `C:\Users\oziel\.claude\plans\project-state-md-ok-now-that-hashed-allen.md`.
 - **Optional separate** — Go rewrite of the agent's hot path; token rotation + multi-source dedup.
+
+**Memory / resource posture (verified 2026-04-30):** keeping all current containers (postgres, redis, backend, frontend, cct-agent, lab-debian) is correct — each is load-bearing and removing any breaks the demonstration. CLAUDE.md §3 + §7 already enforce architectural restraint (no Kafka / Temporal / Elastic / K8s; idle target ~4–6 GB). Phases 22 and 23 add code in the existing backend container, not new services, so the stack stays inside the WSL2 6 GB cap. The bright line that would blow this up — and is therefore explicitly rejected — is bringing in deep-learning ML frameworks. Statistical methods only.
 
 **Wazuh code deletion is NOT on the roadmap.** It stays as a working alternative source indefinitely.
 
