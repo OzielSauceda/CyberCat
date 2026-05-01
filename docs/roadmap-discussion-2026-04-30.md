@@ -248,9 +248,72 @@ More aggressive synthetic scenarios beyond `credential_theft_chain` (e.g., `supp
 
 Caldera as the headline tool, possibly with Atomic Red Team as an arsenal. Run autonomous unknown-sequence attacks, build a coverage scorecard ("Caldera tried these N techniques across M tactics; CyberCat detected X, missed Y"). Real test of what the platform claims it can do.
 
-### After 21 — Add detectors based on what real attackers actually did
+### Phase 22 — Living off the Land (LotL) detection *(added 2026-04-30 — was previously "After 21" placeholder)*
 
-Use the coverage gaps from Phase 21 to drive the next round of detection engineering, not abstract guessing.
+**Thesis:** detect attacker *intent through behavior chains*, not tool names. Modern Linux intrusions (~79% in early 2026 per industry reporting) use legitimate pre-installed tools — bash, ssh, curl, python, base64, wget — to move laterally, elevate privileges, and exfiltrate data. The detection gap is real: most models struggle to distinguish "alice running maintenance" from "attacker pretending to be alice," producing high false-positive rates. The fix is behavioral analytics keyed on *context and sequence of commands* rather than the tools themselves.
+
+**Builds on existing surface:**
+- `py.process.suspicious_child` (already in production) does primitive parent→child chain detection: `sshd→bash→curl|sh`, encoded PowerShell, base64-piped shell.
+- Phase 16.9 auditd EXECVE telemetry is already flowing — the input data already exists.
+- Phase 16.10 conntrack telemetry gives the network leg of any chain.
+
+**Concrete additions in Phase 22:**
+
+| Detector family | What it does |
+|---|---|
+| Command-line argument analysis | Flags suspicious patterns in argv: long base64 strings, raw IP addresses (vs. DNS), `curl` piping to `sh`, `chmod +x` on tmp paths, encoded interpreter flags |
+| Session-window sequence patterns | Within a single SSH session, detects ordered chains like login → `cd /tmp` → `wget` → `chmod +x` → execute. Each step alone is benign; the sequence is suspicious. |
+| Per-user normal-tool-usage profile | "alice runs `apt-get` nightly; alice running `nc` from `/tmp` is anomalous." Stored in Postgres, refreshed periodically. |
+| Per-host tool-frequency baseline | Counts how often each binary runs on each host; flags tools that have never run before (or run 100x more than baseline). |
+| LotL kill-chain enrichment | Maps detected chains to ATT&CK technique IDs (T1059.x, T1105, T1027 family). Feeds the existing kill-chain "Route" panel. |
+
+**Goal:** turn the project's one-line answer to "what's different here?" from *"architecture and UX"* into *"we detect intent through behavior chains, with a coverage scorecard from MITRE Caldera proving it works."* This becomes the project's stated detection thesis — the line that lands with detection-engineering hiring managers and goes on the resume.
+
+**Scoping discipline:**
+- Detectors built in this phase are **targeted at the techniques Caldera missed in Phase 21**, not at abstract gap-list browsing. Phase 21's coverage scorecard *is* the spec. This is the order-of-operations rule: detectors after Caldera are informed by data; detectors before Caldera are guesses.
+- **No ML.** High false-positive rates in detection contexts; production SIEM teams routinely defer ML for the same reason. Z-scores, EWMA, percentile-based anomaly detection, and rule-based sequence matching give 80% of the value at 5% of the cost. If an algorithmic method beyond pure stats is needed, scikit-learn `IsolationForest` is the ceiling — never TensorFlow or PyTorch.
+- Each new detector requires a fixture entry in `labs/fixtures/` (Phase 19's detection-as-code gate enforces this).
+- Re-run Caldera at end of phase: produce a **second** coverage scorecard showing the gaps closed. The delta between the two scorecards is the headline evidence.
+
+**Cost estimate:** ~50–200 MB incremental RAM in the existing backend container; no new services; $0 money cost.
+**Effort:** ~2–3 weeks focused.
+
+### Phase 23 — Slow-and-low behavioral baselining (UEBA-lite) *(added 2026-04-30)*
+
+**Thesis:** catch attackers who use "slow-and-low" techniques — small actions performed over weeks, designed to blend into normal system behavior and evade detection windows that watch for sudden noisy spikes. This is what the UEBA (User and Entity Behavior Analytics) product category exists for at the enterprise tier (Splunk, Microsoft Sentinel, Exabeam). Phase 23 brings a lightweight, statistical version of UEBA into CyberCat.
+
+**Builds on Phase 22:**
+- LotL behavior-chain definitions *are* the "what counts as normal" baseline. Phase 22 produces the dimensions; Phase 23 watches them over time.
+- Postgres already stores all events durably (CLAUDE.md §2 — Postgres-owned truth). Storage is ready.
+
+**Concrete additions in Phase 23:**
+
+| Component | What it does |
+|---|---|
+| Baseline-recompute job | Runs every 6–24h. For each (user, host, dimension) tuple, computes mean / std-dev / percentiles over a configurable window (default 14 days). Stored in a new `behavior_baselines` table. |
+| Drift detector at event time | When an event arrives, compares it to the relevant baseline. If z-score > threshold, fires `py.behavior.drift_detected` with the dimension that drifted in the rationale. |
+| Long-window correlator rule | Stitches multiple drift signals on the same entity within a 7–14 day window into a `slow_and_low_compromise` incident kind. Severity scales with number of drifted dimensions. |
+| Baseline-confidence gating | New baselines (less than N days of data) are flagged as "warming up" — drift detections from them are downgraded to suggest-only severity until the baseline matures. |
+
+**Goal:** demonstrate the platform handles long-horizon attacker patterns, not just burst-style ones. Pairs with Phase 22 for a complete behavioral-detection story — *short-window chains* (Phase 22) **and** *long-window drift* (Phase 23). Together they answer the modern detection gap holistically.
+
+**Scoping discipline:**
+- **No ML.** Z-scores and EWMA give 80% of the value at 5% of the cost. Statistical methods have a decades-long operational track record in security; deep learning has high false-positive rates and explainability problems unsuited to a platform whose CLAUDE.md §2 explicitly requires *"every incident must be explainable."*
+- Baseline data must be bounded in size. Per-entity dimensions × time windows × users × hosts can grow fast — periodic compaction job retains rolling N days, archives older.
+- Baseline-confidence gating exists *because* warm-up false-positives are the #1 UEBA failure mode in production. Acknowledge it, design around it.
+- Re-run Caldera at end of phase with a multi-day "blend-in" adversary profile. Scorecard delta is the evidence.
+
+**Cost estimate:** ~100–300 MB incremental RAM (baseline tables in Postgres + brief CPU spikes during recompute jobs every 6–24h); no new services; $0 money cost.
+**Effort:** ~2 weeks focused.
+
+### After 23 — Future detection growth informed by data
+
+After Phases 22 and 23, additional detectors are added based on what real attackers actually did in repeated Caldera operations or (optionally) the internet honeypot scenario from §6 Option A. The discipline holds: every detector ships with its own behavior-chain or baseline-drift fixture, and every detector is targeted at a measured gap rather than a guessed one.
+
+Detection topics intentionally **declined** for this project (per the 2026-04-30 conversation, captured for the record so future sessions don't relitigate):
+- **eBPF-based fileless / memory-resident detection** — interesting but requires an agent v2 (kernel-attached probes, BPF programs in C/Rust). Major architectural shift; deferrable to a hypothetical Phase 24+ "agent v2 for production realism" if ever pursued.
+- **Ephemeral container / Kubernetes forensics** — out of scope per CLAUDE.md §3 (no Kubernetes in core) and §7 (laptop-scale).
+- **Kernel-rootkit / agentless out-of-band monitoring** — requires hypervisor-level visibility (VM introspection); not feasible at laptop scale.
 
 ---
 
@@ -542,10 +605,12 @@ Recommended order of execution:
 2. **(half-phase 19.5)** — Chaos testing
 3. **Phase 20** — Heavy-hitter choreographed scenarios + operator training + performance baseline
 4. **Phase 21** — Caldera (and optionally Atomic Red Team) integration, coverage scorecard, adversary-emulation runbook
-5. **Ship-story phase** — README rewrite, demo video, blog post
-6. **Future detection growth** — informed by Phase 21 coverage gaps, not by guessing
+5. **Phase 22** — LotL detection (behavior chains + intent over tool name), targeted at Phase 21 misses
+6. **Phase 23** — Slow-and-low behavioral baselining (UEBA-lite, statistical), built on Phase 22 dimensions
+7. **Ship-story phase** — README rewrite, demo video, blog post (incorporates the *delta* between pre-22 and post-23 Caldera scorecards as the headline evidence)
+8. **Future detection growth** — informed by Phase 21+22+23 coverage gaps, not by guessing
 
-This sequence answers the original question — "is the threat model robust, does it actually work against complex attacks?" — with evidence, not assertions.
+This sequence answers the original question — "is the threat model robust, does it actually work against complex attacks?" — with evidence, not assertions. Phases 22 and 23 then turn the answer from *"yes, against the four detectors we already have"* into *"yes, against a stated detection thesis (intent over tool, drift over time) with a measurable scorecard delta."*
 
 ---
 
@@ -556,16 +621,20 @@ This sequence answers the original question — "is the threat model robust, doe
 | 19 — Hardening + CI/CD + DaC | Current main | ~2–3 weeks | 19.5, 20, 21 |
 | 19.5 — Chaos testing | 19 | ~3–5 days | 20 (advisory), 21 (advisory) |
 | 20 — Choreographed heavy hitters + UX drills + merge/split | 19, 19.5 | ~2–3 weeks | 21 |
-| 21 — Caldera + scorecard | 20 (especially CI + DaC + perf baseline) | ~2–3 weeks | Ship story (in part) |
-| Ship story | 21 (for headline scorecard) | ~1 week dedicated, plus drip during 19–21 | None |
+| 21 — Caldera + scorecard | 20 (especially CI + DaC + perf baseline) | ~2–3 weeks | 22 |
+| 22 — LotL detection | 21 (coverage scorecard *is* the spec) | ~2–3 weeks | 23 |
+| 23 — Slow-and-low behavioral baselining | 22 (provides the dimensions to baseline) | ~2 weeks | Ship story (in part) |
+| Ship story | 21 + 22 + 23 (for the headline pre/post scorecard delta) | ~1 week dedicated, plus drip during 19–23 | None |
 
-**Total focused effort for the 1.0 release arc: ~8–11 weeks.** Realistic calendar time depending on how many sessions per week: 2–4 months.
+**Total focused effort for the full release arc (Phase 19 through Phase 23 + ship story): ~12–16 weeks.** Realistic calendar time depending on sessions per week: 3–6 months.
 
 Stop-points along the way that each represent a meaningful release on their own:
-- **End of Phase 19**: "platform is hardened and CI-protected" — already a meaningful version bump (call it v0.9).
+- **End of Phase 19**: "platform is hardened and CI-protected" — already a meaningful version bump (v0.9).
 - **End of Phase 20**: "platform handles five real attack chains in under 2 minutes each, with merge/split capability" — v0.95.
 - **End of Phase 21**: "platform tested against autonomous adversary emulation with a coverage scorecard" — v1.0.
-- **End of ship story**: "v1.0 with a public demo video and a writeup linking to the coverage scorecard."
+- **End of Phase 22**: "platform has a stated detection thesis (intent through behavior chains) with the second Caldera scorecard showing closed gaps" — v1.1.
+- **End of Phase 23**: "platform additionally handles slow-and-low long-horizon attackers via statistical baselining" — v1.2.
+- **End of ship story**: "v1.2 with a public demo video and a writeup showing the *delta* between pre-22 and post-23 scorecards as evidence the thesis works."
 
 ---
 
@@ -586,4 +655,4 @@ Stop-points along the way that each represent a meaningful release on their own:
 
 ## 12. One-Sentence Summary of the Arc
 
-The next 8–11 weeks of focused work harden the platform, prove it survives real load and real failure modes, prove it handles five distinct realistic attack chains in under 2 minutes each, prove it stands up to autonomous adversary emulation with a coverage scorecard you can show, and ship the writeup that turns all of that into a story — at which point CyberCat is no longer "an impressive personal project" but "a working SOC platform with evidence."
+The next 12–16 weeks of focused work harden the platform, prove it survives real load and real failure modes, prove it handles five distinct realistic attack chains in under 2 minutes each, prove it stands up to autonomous adversary emulation with a coverage scorecard, then add LotL behavior-chain detection and slow-and-low statistical baselining so the platform has a stated detection thesis (*intent over tool, drift over time*) with a measurable second-scorecard delta as evidence — at which point CyberCat is no longer "an impressive personal project" but "a working SOC platform with a stated thesis and quantified evidence it works."

@@ -2,6 +2,54 @@
 
 Living status document. Update as reality changes. Short, current, honest.
 
+Last updated: 2026-04-30 (late evening, honest revision) — **Phase 19 code-shipped to `main`, acceptance pending.** Code for workstreams A1–A7 + B + C + D is in `main` via PR #5 (commit `efde988`); the smoke-workflow hotfix in PR #6 is open with all checks green. **However, Phase 19 is NOT complete by its own done-criteria** (`docs/phase-19-plan.md` line 351 + the §"Verification plan"). Earlier framing in this header overstated completion. Live acceptance has gaps in three of nine §"Verification plan" items, and the v0.9 tag is not cut.
+
+**Honest scorecard against `docs/phase-19-plan.md`:**
+
+| Done-criteria clause | State |
+|---|---|
+| Code for A1–A7 + B + C + D implemented | ✅ shipped via PR #5 |
+| ≥ 200 backend tests green | ✅ 236/236 |
+| 122 agent tests green | ✅ on backend image (122); 104 on the CI agent runner (2 cross-image test files skipped) |
+| 0 frontend typecheck errors | ✅ |
+| **Simulator survives `docker compose kill redis` mid-run** | ❌ Failed on Windows/WSL2; diagnosed as platform getaddrinfo NXDOMAIN; **never re-run on Linux** |
+| CI gates every push | ✅ |
+| **Nightly smoke runs against `main`** | ⚠️ Workflow wired (cron `0 6 * * *`) but most recent smoke on `main` is **RED** until PR #6 merges |
+| **Release tag `v0.9` cut** | ❌ |
+
+**Honest scorecard against §"Verification plan" (lines 319–331):**
+
+| # | Item | State |
+|---|---|---|
+| 1 | Resilience pytest | ✅ 236/236 |
+| 2 | Manual Redis kill-test (live) | ❌ Failed on Windows; never tested on Linux |
+| 3 | Manual Postgres restart-test (live) | ⚠️ A3.1 unit test passes, but the live `100/s × 30s + restart postgres at t=10s` retest with ≥ 95% acceptance was **never re-run** after the fix |
+| 4 | Load test 1000/s × 60s | ❌ Heavy-hitting only ran **100/s × 60s** — one order of magnitude below §A6 (line 125) |
+| 5 | Hot-route ≤ 4 queries on 50-item page | ⚠️ Achieved ≤ 12 / ≤ 10 — better than baseline (250+ / 200+) but the plan target was ≤ 4 |
+| 6 | Detection-as-code | ✅ |
+| 7 | CI proof | ✅ |
+| 8 | Smoke proof | ❌ Smoke on `main` is currently red (waiting on PR #6) |
+| 9 | Frontend typecheck | ✅ |
+
+## What's pending — pick up here in this order
+
+1. **Merge PR #6** (`fix/smoke-workflow-agent-profile`). All 6 checks green. Closes verification-plan items #7 and #8.
+2. **Watch Smoke run green on `main`** after merge. Same workflow that just passed on the PR trigger; should be green.
+3. **Re-run the Redis kill-test (live) on Linux.** Plan §A1 acceptance (line 67): `docker compose kill redis` mid-`credential_theft_chain --speed 0.1`. The full reproduction recipe is in `docs/phase-19-handoff.md` § "How to verify the fixes worked" (Test 3). Easiest path: run the chaos commands inside a Linux container (`docker run --rm -v "$PWD:/work" ubuntu:24.04 ...`) or via a temporary `workflow_dispatch` GH Actions workflow against a Linux runner. **Pass criterion:** simulator's `--verify` PASSES, latency on each request < 1s, no traceback. **Failure path:** the deferred work in the handoff's "A1.1 residual gap" lands first.
+4. **Re-run the Postgres restart-test (live).** Plan §A3 + Gap 2 (line 405): `100/s × 30s` against `/v1/events/raw` with `docker compose restart postgres` at t=10s. **Pass criterion:** ≥ 95% accepted, recovery within 30s, transport_errors well below 1992 (the pre-fix number).
+5. **Run the load harness at the §A6 acceptance level.** Plan §A6 (line 125): `python labs/perf/load_harness.py --rate 1000 --duration 60` (the heavy-hitting trail only ran 100/s — that's not the bar the plan committed to). **Pass criterion:** 0% drops at the API layer, p95 detection latency < 500ms, peak Postgres connection count < 25.
+6. **Reconcile hot-route query count.** Plan §A7 (line 138) targeted ≤ 4 queries on a 50-item page; we shipped at ≤ 12 (incidents) / ≤ 10 (detections). Two honest options: (a) tighten the routes further by collapsing the entity-count + event-count + detection-count loads into one CTE and confirming ≤ 4, or (b) write a one-line amendment to the plan justifying the ≤ 12 / ≤ 10 floor (e.g., separate batched queries are clearer than a CTE for future maintainers; the meaningful win is N → constant, not constant → 4) and update the done-criteria text to match. Either is defensible; both close the gap honestly.
+7. **Tag `v0.9`** — only after 1–6 above. Skipping any of them is shipping with a debt the plan explicitly forbade.
+
+The story of the day (workflow plumbing, no product changes — preserved from the pre-revision header):
+
+- The Smoke workflow shipped in Phase 19 was push-to-main only, so it never ran during the PR cycle. Its first real run failed because (a) it brought up only `postgres redis backend frontend` instead of the full `--profile agent` stack — three smoke scripts need `cct-agent` + `lab-debian` — and (b) the agent needs `CCT_AGENT_TOKEN` provisioned by `start.sh`, which the workflow wasn't using.
+- Hotfix branch `fix/smoke-workflow-agent-profile` (PR #6) replaces the bare `docker compose up` with `bash start.sh` (defaults to `--profile agent` and bootstraps the token), installs `httpx` on the runner (host-side simulator dep), pins `pytest` ordering on the merge gate (`-p no:randomly`) so the seed-shuffle flake we hit twice goes away, and adds a narrow `pull_request` trigger to `smoke.yml` so workflow/compose changes self-validate before merge instead of blowing up post-merge.
+- Earlier same-day on the Phase 19 PR: agent CI was failing because `*.log` in `.gitignore` (under `# Docker`) was eating five test fixture files in `agent/tests/fixtures/` — they existed locally so my pytest passed but the GH Actions checkout had no fixtures. Fixed via a `!agent/tests/fixtures/*.log` negation + force-tracking the five files.
+- **The product code did not change today.** Everything above is workflow / .gitignore / annotation-surfacer plumbing on top of Phase 19's already-merged backend + agent + docs work. No architectural shift. See `docs/phase-19-summary.md` for the plain-language version of "what Phase 19 actually changed."
+
+---
+
 Last updated: 2026-04-30 (evening) — **Phase 19 NOT YET SHIP-READY.** Code work for A1–A7, B, C, D done on disk. **233 backend tests + 101/101 smoke pass**, but heavy-hitting verification surfaced two real gaps that the unit tests missed:
 
 - **A1.1 (follow-up needed):** When Redis is killed (container removed), DNS lookups for `redis` start failing slowly (~5s each). Cumulative latency on a single ingest request exceeds the simulator's default httpx timeout — events that complete still land in Postgres correctly, but client-visible latency spikes severely. Fix: explicit `socket_connect_timeout` + `socket_timeout` on the redis client; wire `safe_redis` into the streaming publisher.
@@ -19,7 +67,7 @@ Last updated: 2026-04-29 — **Phase 17 ✅ FULLY SHIPPED (incl. 17.8 docs/ADR/s
 
 ## Status summary
 
-**Phase:** Phase 18 ✅ SHIPPED 2026-04-29 (merged to main via PR #3). Phase 17 ✅ FULLY SHIPPED 2026-04-29 (17.1–17.7 code-complete prior, 17.8 docs/ADR/smoke landed today). Phase 16.10 ✅ FULLY VERIFIED 2026-04-28. Phase 16.9 ✅ FULLY VERIFIED. Phase 16 ✅ FULLY VERIFIED. Phase 15 ✅ FULLY VERIFIED.
+**Phase:** Phase 19 🟡 CODE-SHIPPED, ACCEPTANCE PENDING 2026-04-30 (merged to main via PR #5, smoke-fix PR #6 ready; 3 of 9 verification-plan items still open + v0.9 tag not cut — see top-of-file pickup list). Phase 18 ✅ SHIPPED 2026-04-29 (PR #3). Phase 17 ✅ FULLY SHIPPED 2026-04-29 (17.1–17.7 code-complete prior, 17.8 docs/ADR/smoke). Phase 16.10 ✅ FULLY VERIFIED 2026-04-28. Phase 16.9 ✅ FULLY VERIFIED. Phase 16 ✅ FULLY VERIFIED. Phase 15 ✅ FULLY VERIFIED.
 
 **Overall posture (honest):**
 
@@ -35,38 +83,141 @@ Last updated: 2026-04-29 — **Phase 17 ✅ FULLY SHIPPED (incl. 17.8 docs/ADR/s
 
 ## What needs to happen next session (pick up here)
 
-**Phases 17 and 18 are now both fully shipped.** No outstanding items on the redesign track.
+**Phase 19 is code-shipped to `main` but not formally complete.** Phases 17 and 18 are fully shipped. The Phase 19 plan's own done-criteria (`docs/phase-19-plan.md` line 351) and §"Verification plan" (lines 319–331) call out three live-acceptance items + one numerical target + the v0.9 tag that were not closed during the merge cycle. The single source of truth for what's left is the top-of-file header above ("What's pending — pick up here in this order"). For convenience, the same seven items, in the same order:
+
+1. **Merge PR #6** (`fix/smoke-workflow-agent-profile`). All 6 checks green. Closes verification-plan items #7 (CI proof) and #8 (smoke proof on `main`).
+2. **Watch Smoke run green on `main`** after merge.
+3. **Re-run Redis kill-test (live) on Linux.** Plan §A1 acceptance bar; reproduction recipe in `docs/phase-19-handoff.md` § "How to verify the fixes worked" (Test 3). Required to close verification-plan item #2.
+4. **Re-run Postgres restart-test (live).** `100/s × 30s` against `/v1/events/raw` with `restart postgres` at t=10s; ≥ 95% accepted, recovery within 30s. Required to close verification-plan item #3.
+5. **Run load harness at the §A6 bar** — `python labs/perf/load_harness.py --rate 1000 --duration 60` (the heavy-hitting trail only ran 100/s). 0% drops, p95 < 500ms, peak Postgres connections < 25. Required to close verification-plan item #4.
+6. **Reconcile hot-route query count.** Plan §A7 targeted ≤ 4 queries on a 50-item page; we shipped at ≤ 12 / ≤ 10. Either tighten with a CTE refactor or write a one-line plan amendment justifying the floor and update done-criteria text. Required to close verification-plan item #5.
+7. **Tag `v0.9`** against the merge commit — only after 1–6 above. Skipping any is shipping with debt the plan explicitly forbade.
+
+After Phase 19 closes, the next phase per the roadmap is **Phase 19.5 (chaos testing)** — a separate half-phase that systematizes the kind of failure injection we did manually. Plan: `docs/roadmap-discussion-2026-04-30.md` (also referenced from `docs/phase-19-plan.md`).
 
 **Verified 2026-04-29:**
 - **Phase 17 spot-fix aesthetic pass — RESOLVED.** Verification of the surfaces called out in this section (NavBar, HelpMenu, CaseBoard, badge components in layout, welcome `page.tsx`) confirmed they are now fully on dossier tokens (`bg-dossier-stamp`, `border-dossier-paperEdge`, `text-dossier-ink`, `dossier-evidenceTape`); no `bg-zinc-900/50` fallback remains. Most likely repainted during Phase 18.8 work after `frontend-design` was invoked. Other files in the tree still reference zinc (login page, Skeleton, ConfidenceBar, some incident-detail panels) but those are not the Phase 17.2/17.3 surfaces this note was about.
 - **Phase 17.8 — DONE.** `docs/decisions/ADR-0014-frontend-detective-redesign.md` written. `labs/smoke_test_phase17.sh` written. `docs/runbook.md` "First-run experience (Phase 17)" section added. `Project Brief.md` postscript on case-file frontend identity added. `CyberCat-Explained.md` §8 expanded with frontend identity / first-run / glossary / plain-language / auto-seed sub-sections; §15 updated with Phase 15–18 entries. The renumber line in the original 17.8 plan was correctly dropped (Phase 18 became the plain-language rewrite, not the Go rewrite).
 
-**Phase 19 (in progress)** — Hardening, error-proofing, CI/CD, detection-as-code. Plan: `docs/phase-19-plan.md`. Workstreams complete:
-- A1 Redis graceful degradation (detectors fail-safe; ingest survives Redis outage)
-- A2 Wazuh poller circuit-breaker (10 consecutive ingest failures → abort batch, no cursor advance)
-- A3 Postgres pool config (`pool_size=20, max_overflow=10, pool_recycle=1800, pool_timeout=10`) + ingest retry on connection_invalidated
-- A4 Event ingest validation (raw ≤ 64KB, normalized ≤ 16KB, occurred_at within [now-30d, now+5m], dedupe_key printable-ASCII)
-- A5 SSE bus supervisor (auto-reconnect on Redis pub/sub crash, 2s backoff)
-- A6 Load harness shipped at `labs/perf/load_harness.py` (acceptance check + JSON summary)
-- A7 N+1 elimination on `GET /v1/incidents` (250 → ≤ 12 queries) and `GET /v1/detections` (200 → ≤ 10)
-- B Quality bar: ruff config + clean (backend + agent), pytest-randomly added (3 random seeds × 233 tests all green)
-- C CI: `.github/workflows/ci.yml` + `smoke.yml`; minimal README with badges
-- D Detection-as-code: `labs/fixtures/` (8 fixtures + manifest + replay) + `test_detection_fixtures.py` (10 cases)
-
-**Phase 19 verification deferred to first push:** CI green-on-push proof, smoke.yml run on main, manual `docker compose kill redis` end-to-end test, `v0.9` git tag.
+**Phase 19 ✅ shipped 2026-04-30 (PR #5).** Stale "in progress" rundown formerly here is superseded by the dedicated Phase 19 entry in the phase-by-phase section below. Quick recap of what landed: A1–A7 (resilience), B (ruff + pytest-randomly), C (CI + smoke workflows), D (detection-as-code fixtures). Plan: `docs/phase-19-plan.md`. Plain-language summary: `docs/phase-19-summary.md`. Handoff (incl. residual gap diagnosis): `docs/phase-19-handoff.md`.
 
 **Future / optional phases (renumbered to reflect reality):**
 - **Phase 19.5** — Chaos testing (kill Redis / restart Postgres / network-partition agent / OOM-kill backend mid-correlation). See `docs/phase-19-plan.md` cross-reference.
 - **Phase 20** — Heavy-hitter choreographed scenarios (`lateral_movement_chain`, `crypto_mining_payload`, `webshell_drop`, `ransomware_staging`, `cloud_token_theft_lite`) + operator drills + merge/split incidents.
-- **Phase 21** — Caldera adversary emulation + coverage scorecard.
+- **Phase 21** — Caldera adversary emulation + coverage scorecard. Headline artifact: a markdown coverage scorecard from MITRE's autonomous adversary emulator showing "techniques attempted vs. techniques detected" with detection latencies and missed-technique listings.
+- **Phase 22 — Living off the Land (LotL) detection** *(planned, detailed design deferred to post-Phase-21 coverage data — agreed 2026-04-30)*
+  - **Thesis:** detect attacker *intent through behavior chains*, not tool names. Modern Linux intrusions (~79% in early 2026) use legitimate pre-installed tools — bash, ssh, curl, python, base64, wget. Distinguishing "alice running maintenance" from "attacker pretending to be alice" requires looking at the *sequence* and *context* of commands, not the binaries themselves.
+  - **Builds on:** existing `py.process.suspicious_child` detector (already does primitive parent→child chain detection — sshd→bash→curl|sh, encoded PowerShell). Extends with: command-line argument analysis (curl flags, base64 strings, suspicious target paths), session-window sequence pattern matching (e.g., login → cd /tmp → wget → chmod +x → execute), per-user/per-host normal-tool-usage profiles, command frequency baselines.
+  - **Goal:** turn the project's one-line answer to "what's different here" from "architecture and UX" into *"we detect intent through behavior chains, with a coverage scorecard from MITRE Caldera proving it works."* This becomes the project's stated detection thesis and the headline differentiator beyond the existing platform shape.
+  - **Scoping discipline:** detectors built in this phase are *targeted at the techniques Caldera missed in Phase 21*, not abstract gap-list browsing. Stays rule-based + statistical — **no ML** (high false-positive rates in detection contexts; statistical methods give 80% of value at 5% of cost). Detailed design intentionally deferred until Phase 21 coverage data exists, so each detector is informed by data rather than guessing.
+  - **Cost estimate:** ~50–200 MB incremental RAM in the existing backend container; no new services; $0 money cost.
+  - **Effort:** ~2–3 weeks focused.
+- **Phase 23 — Slow-and-low behavioral baselining (UEBA-lite)** *(planned, follows Phase 22 — agreed 2026-04-30)*
+  - **Thesis:** catch attackers who use "slow-and-low" techniques — small actions over weeks designed to blend into normal system behavior and evade detection windows that watch for sudden noisy spikes. This is what the UEBA (User and Entity Behavior Analytics) product category exists for.
+  - **Builds on:** Phase 22's LotL behavior-chain definitions (those *are* the "what counts as normal" baseline). Extends correlator window from minutes to weeks. Per-user / per-host / per-entity baselines stored in Postgres, recomputed periodically (every 6–24h). Drift detection at event time using statistical methods (z-score, EWMA, percentile-based anomaly).
+  - **Goal:** demonstrate the platform handles long-horizon attacker patterns, not just burst-style ones. Pairs with Phase 22 for a complete behavioral-detection story — short-window chains *and* long-window drift.
+  - **Scoping discipline:** **no ML — z-scores and EWMA give 80% of the value at 5% of the cost.** Production SIEMs lean on statistical methods for the same reason. Avoid TensorFlow / PyTorch / deep learning entirely; if any algorithmic detection is needed beyond pure stats, scikit-learn Isolation Forest is the ceiling.
+  - **Cost estimate:** ~100–300 MB incremental RAM (baseline tables in Postgres + brief CPU spikes during recompute jobs); no new services; $0 money cost.
+  - **Effort:** ~2 weeks focused.
 - **Ship-story phase** — README rewrite, demo GIF, public repo prep. Plan at `C:\Users\oziel\.claude\plans\project-state-md-ok-now-that-hashed-allen.md`.
 - **Optional separate** — Go rewrite of the agent's hot path; token rotation + multi-source dedup.
+
+**Memory / resource posture (verified 2026-04-30):** keeping all current containers (postgres, redis, backend, frontend, cct-agent, lab-debian) is correct — each is load-bearing and removing any breaks the demonstration. CLAUDE.md §3 + §7 already enforce architectural restraint (no Kafka / Temporal / Elastic / K8s; idle target ~4–6 GB). Phases 22 and 23 add code in the existing backend container, not new services, so the stack stays inside the WSL2 6 GB cap. The bright line that would blow this up — and is therefore explicitly rejected — is bringing in deep-learning ML frameworks. Statistical methods only.
 
 **Wazuh code deletion is NOT on the roadmap.** It stays as a working alternative source indefinitely.
 
 ---
 
 ## Phase-by-phase state
+
+### Phase 19 — 🟡 CODE-SHIPPED 2026-04-30, ACCEPTANCE PENDING — Hardening, CI/CD, Detection-as-Code
+
+**Plan:** `docs/phase-19-plan.md`
+**Handoff:** `docs/phase-19-handoff.md`
+**Plain-language summary:** `docs/phase-19-summary.md`
+**Merged via:** PR #5 (`phase-19` → `main`, commit `efde988`).
+**Follow-up smoke fix:** PR #6 (`fix/smoke-workflow-agent-profile`) — open, all checks green, ready to merge.
+
+> **Honest status (revised):** earlier framing in this entry called Phase 19 "shipped" — that was overstated. The code is in `main`, the test posture is green, but the §"Verification plan" in `docs/phase-19-plan.md` has three items that were never closed (live Redis-kill on Linux, live Postgres restart re-verification, 1000/s load test) plus one numerical delta vs target (hot-route query count ≤ 12 actual vs ≤ 4 planned). v0.9 tag is not cut. The seven concrete pickup steps to actually close the phase live in the top-of-file header above ("What's pending — pick up here in this order").
+
+**What Phase 19 does (one line):** It doesn't add new product features — it hardens what already exists, puts a continuous-integration gate in front of the repo, and adds a regression harness for detector behavior. After Phase 19, every push to a branch runs lint + tests across backend + agent + frontend; every push to `main` runs the smoke chain end-to-end; and every detector has a curated input fixture asserting it still fires.
+
+**What did NOT change:** the architectural layers (telemetry → normalize → detect → correlate → incident → response → UI) and their boundaries are exactly as they were after Phase 18. No new layer, no service swapped out, no schema rewrites. The custom-built / integrated split (per CLAUDE.md §6) is untouched. This is reinforcement, not a redesign.
+
+**Workstreams (A1–A7, B, C, D):**
+
+- **A1 — Redis graceful degradation.** Detector code paths that hit Redis (`auth_failed_burst`, `auth_anomalous_source_success`, `blocked_observable`, plus the streaming publisher and the `endpoint_compromise_standalone` SETNX dedup) now go through a new `safe_redis()` helper in `backend/app/db/redis_state.py`. The helper is bounded by `asyncio.wait_for(_OP_TIMEOUT_SEC=3.0)` and a circuit breaker (`_BREAKER_OPEN_SEC=5.0`) so a Redis outage causes detectors to skip cleanly rather than crash. `backend/app/db/redis.py` raises `RedisUnavailable` instead of the old `assert`. `backend/app/streaming/bus.py` got a supervisor: if the pubsub consumer crashes (Redis blip), it auto-reconnects with a 2s backoff without losing registered SSE consumers.
+
+- **A2 — Wazuh poller circuit-breaker.** `backend/app/ingest/wazuh_poller.py` aborts a batch and skips the cursor advance after 10 consecutive transient errors; the next interval starts the count over. Prevents a flapping Wazuh manager from corrupting the cursor.
+
+- **A3 — Postgres pool config + retry.** `backend/app/db/session.py` now sets `pool_size=20, max_overflow=10, pool_recycle=1800, pool_timeout=10, pool_pre_ping=True` explicitly (was default). New `backend/app/ingest/retry.py` exports `with_ingest_retry()` which retries once on `connection_invalidated` `DBAPIError`. Wired into both the Wazuh poller AND the HTTP `POST /v1/events/raw` route — the latter was a real gap caught during heavy-hitting testing (Postgres restart mid-load → 0/1992 events accepted before the fix; ≥95% after).
+
+- **A4 — Event ingest validation.** `backend/app/api/schemas/events.py` got pydantic validators bounding raw payload (≤ 64 KB), normalized payload (≤ 16 KB), `occurred_at` skew (must fall within `[now − 30d, now + 5m]`), and `dedupe_key` charset (printable ASCII only). New negative test suite at `backend/tests/integration/test_event_validation_negative.py`.
+
+- **A5 — SSE bus supervisor.** Covered under A1 — `backend/app/streaming/bus.py`. New unit test `test_bus_supervisor.py`.
+
+- **A6 — Load harness.** `labs/perf/load_harness.py` — repeatable load test (rate, duration, concurrency knobs) emitting JSON acceptance summary. Used to prove A3 fixes; lives in the repo for future regression checks. Baseline numbers: `docs/perf-baselines/2026-04-30-phase19-pre-perf.md`.
+
+- **A7 — N+1 elimination on hot routes.** `backend/app/api/routers/incidents.py` and `routers/detections.py` rewritten to batch-load related rows. `GET /v1/incidents` page-load went from 250+ queries to ≤ 12. `GET /v1/detections` went from 200+ to ≤ 10. Enforced by a new `count_queries` fixture in `backend/tests/conftest.py` and `backend/tests/integration/test_hot_route_query_count.py`.
+
+- **B — Quality bar.** `ruff` config + clean on `backend/app/` and `agent/cct_agent/`. `pytest-randomly` added to dev deps (caught one real order-dependent issue during development; pinned via `-p no:randomly` on the CI merge gate so the gate stays deterministic, but still randomized locally to keep shaking out bugs).
+
+- **C — Continuous integration.** `.github/workflows/ci.yml` (every push, every PR — three jobs: backend lint+pytest, agent lint+pytest, frontend typecheck+build) and `.github/workflows/smoke.yml` (push to `main`, daily 06:00 UTC cron, plus a narrow `pull_request` trigger when smoke-relevant paths change so the workflow self-validates before merging — added in PR #6 after the original ship-then-discover-it's-broken story). Both workflows tee pytest/script output and emit `::error::` annotations so failure surfaces in the publicly readable annotations API even when raw job logs are auth-walled.
+
+- **D — Detection-as-code.** New `labs/fixtures/` tree with `manifest.yaml`, `replay.py`, and curated JSONL fixtures grouped by event kind (auth / process / network). Each fixture maps to an expected detection rule outcome (fires, or cleanly skips). `backend/tests/integration/test_detection_fixtures.py` walks the manifest and asserts each rule's actual behavior matches the expected outcome. Adding a new detector now requires a fixture entry; adding a fixture is the cheap way to lock in the expected behavior of an existing detector.
+
+**Files added (new):**
+```
+.github/workflows/ci.yml
+.github/workflows/smoke.yml
+README.md                                              (project intro + CI badges)
+backend/app/db/redis_state.py                          (safe_redis + circuit breaker)
+backend/app/ingest/retry.py                            (with_ingest_retry)
+backend/tests/integration/test_detection_fixtures.py
+backend/tests/integration/test_event_validation_negative.py
+backend/tests/integration/test_hot_route_query_count.py
+backend/tests/integration/test_postgres_disconnect.py
+backend/tests/unit/test_bus_supervisor.py
+backend/tests/unit/test_postgres_resilience.py
+backend/tests/unit/test_redis_unavailable.py
+backend/tests/unit/test_wazuh_poller_resilience.py
+docs/decisions/ADR-0014-frontend-detective-redesign.md (Phase 17.8 ADR; landed in this batch)
+docs/perf-baselines/2026-04-30-phase19-pre-perf.md
+docs/phase-19-plan.md
+docs/phase-19-handoff.md
+docs/phase-19-summary.md                               (added 2026-04-30 late evening)
+docs/roadmap-discussion-2026-04-30.md
+labs/fixtures/manifest.yaml + README.md + replay.py
+labs/fixtures/auth/{ssh_brute_force_burst, successful_login_clean, successful_login_anomalous}.jsonl
+labs/fixtures/process/{benign_apt_update, encoded_powershell, curl_pipe_sh}.jsonl
+labs/fixtures/network/{benign_outbound, known_bad_ip_beacon}.jsonl
+labs/perf/load_harness.py
+```
+
+**Files modified (key ones):**
+- Backend: `app/db/redis.py` (RedisUnavailable), `app/db/session.py` (pool config), `app/streaming/bus.py` (supervisor), `app/streaming/publisher.py` (safe_redis), `app/correlation/rules/endpoint_compromise_standalone.py` (safe_redis SETNX), all three detector rules listed in A1, `app/api/routers/{incidents,detections,events}.py` (A7 + A3.1), `app/api/schemas/events.py` (A4 validators), `app/ingest/wazuh_poller.py` (A2 + A3 retry), `app/main.py` (lifespan: 64-worker thread executor), `app/correlation/__init__.py` (registration order pinned with isort: skip_file), `app/auth/dependencies.py` (ruff fix), `tests/conftest.py` (count_queries fixture, breaker reset), `tests/integration/test_response_action_emits.py` (relative timestamps).
+- Agent: ruff auto-fixes across `cct_agent/` (`datetime.UTC` instead of `timezone.utc`, `TimeoutError` instead of `asyncio.TimeoutError`, `from __future__` future-style annotations).
+- Both `pyproject.toml`s: ruff/mypy/pytest-randomly dev deps + tool config.
+- Compose: `infra/compose/docker-compose.yml` bind-mounts `labs/` into the backend container at `/app/labs:ro` so `test_detection_fixtures.py` can resolve the manifest from inside the container.
+- `labs/smoke_test_phase17.sh` (was untracked; tracked + fixed schema reference now).
+
+**Smoke fix follow-up (PR #6, 2026-04-30 late evening):**
+- `.github/workflows/smoke.yml` rewritten: uses `bash start.sh` (default `--profile agent` + token bootstrap) instead of bare `docker compose up`; adds an `actions/setup-python@v5` + `pip install httpx>=0.27` step (the simulator + replay drive the backend over HTTP from the *host*); per-script `::error::` surfacer + `smoke-logs` artifact upload; teardown + on-failure log capture both pass `--profile agent`; new narrow `pull_request` trigger filtered to `.github/workflows/smoke.yml`, `infra/compose/**`, `labs/smoke_test_*.sh`, `start.sh` so future smoke-surface changes self-validate before merge.
+- `.gitignore` got `!agent/tests/fixtures/*.log` (under the `# Docker` `*.log` block) and the five fixture files were force-tracked so CI can read them. (The fixtures were never tracked since they were created — local pytest passed because the files existed locally.)
+- `.github/workflows/ci.yml`: pytest invocations gained `-p no:randomly` on the merge gate (deterministic CI; pytest-randomly still active locally) and `--tb=long -ra` + tee + `::error::` annotation surfacer for both backend and agent jobs (the same trick that made it possible to debug the auth-walled job-logs problem in the first place).
+
+**Test posture at ship:**
+- Backend pytest: **236/236** (174 baseline + 62 new). Ruff clean on `app/`.
+- Agent pytest: **104/104** (excludes `test_events_network.py` + `test_events_process.py` on CI — they import `app.*` which isn't in the agent venv; they pass when run from the backend image). Ruff clean on `cct_agent/`.
+- Smoke chain on the GH Actions Linux runner: **7/7** scripts (Phase 17 + the six default-profile smokes).
+- Frontend typecheck: clean.
+
+**Heavy-hitting residual gap (deferred — not blocking ship; informally blocks v0.9 if reproducible on Linux):**
+- `docker compose kill redis` mid-simulator on **Windows/WSL2 + Docker Desktop** still produces `httpx.ReadTimeout` on the simulator side. Diagnosed as a getaddrinfo NXDOMAIN latency issue specific to that platform (~3.6s lookup against a removed container, uncancellable from asyncio because it runs in a thread). Full diagnostic + recommended next steps in `docs/phase-19-handoff.md` § "A1.1 residual gap". Action item: re-run on the Linux CI runner; if it passes there, the gap is platform-only and v0.9 ships.
+
+**ADR:** none specifically authored for Phase 19 — the resilience changes follow existing decisions (ADR-0002 stack constraints, ADR-0011 telemetry pluggability). The detection-as-code structure is intentionally lightweight and can be promoted to an ADR if the manifest format needs to evolve.
+
+---
 
 ### Phase 18 — ✅ SHIPPED 2026-04-29 — Plain-Language Rewrite + Kill-Chain & Timeline Redesign
 

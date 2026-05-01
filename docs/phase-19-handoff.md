@@ -2,6 +2,47 @@
 
 Pick up here. Read this top-to-bottom; it's the shortest path to context.
 
+---
+
+## STATUS — 🟡 CODE-SHIPPED 2026-04-30, ACCEPTANCE PENDING (read this first)
+
+**Phase 19 code merged to `main` via PR #5** (`phase-19` → `main`, commit `efde988`). Backend pytest **236/236**, agent pytest **104/104** on the CI agent runner (122/122 on the backend image), ruff clean, frontend typecheck clean, Linux smoke chain **7/7** on the PR-trigger run.
+
+**Earlier framing in this section called Phase 19 "shipped" — that was overstated.** The Phase 19 plan's own done-criteria (line 351) and §"Verification plan" (lines 319–331) have three live-acceptance items that were never closed during the merge cycle, plus one numerical delta vs target, plus the v0.9 tag. Honest scorecard:
+
+| # | Verification-plan item | State |
+|---|---|---|
+| 1 | Resilience pytest | ✅ 236/236 |
+| 2 | Manual Redis kill-test (live) | ❌ Failed on Windows/WSL2; never re-run on Linux |
+| 3 | Manual Postgres restart-test (live) | ⚠️ A3.1 unit test passes, but the live `100/s × 30s + restart postgres at t=10s` retest with ≥ 95% acceptance was **never re-run** after the fix landed |
+| 4 | Load test 1000/s × 60s | ❌ Heavy-hitting trail only ran **100/s × 60s** — one order of magnitude below §A6 (line 125) |
+| 5 | Hot-route ≤ 4 queries on 50-item page | ⚠️ Achieved ≤ 12 / ≤ 10 — better than baseline (250+ / 200+) but plan target was ≤ 4 |
+| 6 | Detection-as-code | ✅ |
+| 7 | CI proof | ✅ (the `.gitignore` fixture bug surfaced and got caught) |
+| 8 | Smoke proof on `main` | ❌ Smoke on `main` is currently **RED** (the workflow shipped broken; PR #6 is the fix, all 6 checks green, ready to merge) |
+| 9 | Frontend typecheck | ✅ |
+| 10 | `v0.9` tag cut | ❌ Not applied |
+
+**Story of the smoke-fix follow-up (PR #6):** the Smoke workflow shipped in Phase 19 was push-to-main only, so it never ran during the PR cycle. Its first real run failed because (a) it brought up only `postgres redis backend frontend` instead of the full `--profile agent` stack — three of the six smoke scripts in step 5 (`smoke_test_phase16_9.sh`, `smoke_test_phase16_10.sh`, `smoke_test_agent.sh`) require `cct-agent` + `lab-debian` — and (b) the agent needs `CCT_AGENT_TOKEN` provisioned by `start.sh`'s bootstrap. Fix: replaced the bare `docker compose up` with `bash start.sh` (defaults to `--profile agent` + token bootstrap), installed `httpx` on the runner (the simulator + replay drive the backend over HTTP from the host), pinned `pytest` ordering on the merge gate (`-p no:randomly` — pytest-randomly was double-flaking the same commit between push and PR triggers), added per-script `::error::` annotation surfacing + a `smoke-logs` artifact, and added a narrow `pull_request` trigger so future smoke/compose changes self-validate before merge.
+
+**Also landed during the merge cycle:** `*.log` in `.gitignore` (under `# Docker`) was eating five test fixture files in `agent/tests/fixtures/` — they existed locally so my pytest passed but the GH Actions checkout had nothing in the directory. Fixed via `!agent/tests/fixtures/*.log` negation + force-tracking.
+
+## Remaining work — pick up here in this order
+
+1. **Merge PR #6** (`fix/smoke-workflow-agent-profile`). All 6 checks green (CI push + PR × 3 jobs, Smoke PR run). Closes scorecard items #7 and #8.
+2. **Watch the Smoke workflow on `main`** after merge. Should be green (we just verified the same workflow on the PR trigger). If not, the per-script `::error::` annotations + the `smoke-logs` artifact will surface the failing script and its tail without needing job-log auth.
+3. **Re-run the Redis kill-test (live) on Linux.** Plan §A1 acceptance (line 67). Reproduction recipe in "How to verify the fixes worked" below (Test 3). Easiest path: run inside an Ubuntu container, or via a temporary `workflow_dispatch` invocation against a Linux runner. Pass: simulator's `--verify` PASSES, latency on each request < 1s, no traceback. If it fails on Linux too, the deferred work in "A1.1 residual gap" below has to land first. Closes scorecard item #2.
+4. **Re-run the Postgres restart-test (live).** `100/s × 30s` against `/v1/events/raw` with `restart postgres` at t=10s. Pass: ≥ 95% accepted, recovery within 30s, transport_errors well below 1992 (the pre-fix number). Recipe in "How to verify the fixes worked" below (Test 4). Closes scorecard item #3.
+5. **Run the load harness at the §A6 bar.** `python labs/perf/load_harness.py --rate 1000 --duration 60` — the heavy-hitting trail only exercised 100/s, an order of magnitude below the bar. Pass: 0% drops at the API layer, p95 detection latency < 500ms, peak Postgres connection count < 25. Closes scorecard item #4.
+6. **Reconcile hot-route query count.** Plan §A7 (line 138) targeted ≤ 4 queries on a 50-item page; we shipped at ≤ 12 (incidents) / ≤ 10 (detections). Two honest options: (a) tighten the routes further by collapsing the entity-count + event-count + detection-count loads into one CTE and confirm ≤ 4, or (b) write a one-line amendment to the plan justifying the ≤ 12 / ≤ 10 floor (e.g., separate batched queries are clearer than a CTE for future maintainers; the meaningful win is N → constant, not constant → 4) and update the done-criteria text to match. Closes scorecard item #5.
+7. **Tag `v0.9`** against the merge commit — only after 1–6 above. Skipping any is shipping with debt the plan explicitly forbade. Closes scorecard item #10.
+
+For a plain-language overview of what Phase 19 actually changed in the codebase (NEW vs MODIFIED, did the architecture change?), see `docs/phase-19-summary.md`.
+
+The original handoff content below is preserved verbatim for the historical record; the gap-1 / gap-2 notes captured the in-flight state at the time it was written.
+
+---
+
 ## TL;DR
 
 - Phase 19 code work for A1–A7, B, C, D is **complete on disk** but **not committed**.
