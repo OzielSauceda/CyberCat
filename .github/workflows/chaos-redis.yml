@@ -104,7 +104,16 @@ jobs:
           KILL_AT: ${{ inputs.kill_at }}
           RESTORE_AFTER: ${{ inputs.restore_after }}
         run: |
+          # Trace mode: echo every command before bash runs it. Combined with
+          # explicit "CHECKPOINT" markers below, this makes every step of the
+          # script visible in the log even if a later command silently exits.
+          # We deliberately do NOT enable `-e` — the script must continue
+          # through expected failures (psql errors, grep no-match) so the
+          # §A1 evaluation can run even when one signal is missing.
+          set -x
           set -uo pipefail
+
+          echo "CHECKPOINT 1: script entered  $(date -Is)"
 
           # Start simulator in background. --no-verify because the §A1 bar is
           # graceful degradation, not "incident tree forms during chaos" — see
@@ -117,28 +126,41 @@ jobs:
             --no-verify \
             > sim.log 2>&1 &
           SIM_PID=$!
-          echo "simulator PID=$SIM_PID"
+          echo "CHECKPOINT 2: simulator backgrounded  PID=$SIM_PID"
 
           # Wait briefly for the simulator to start firing, then kill Redis.
           sleep "$KILL_AT"
-          echo "::group::kill redis"
-          docker compose -f infra/compose/docker-compose.yml --profile agent kill redis
-          docker compose -f infra/compose/docker-compose.yml --profile agent ps
-          echo "::endgroup::"
+          echo "CHECKPOINT 3: pre-kill window over (slept $KILL_AT s)"
+
+          # No `::group::` here — groups collapse in the UI and have been
+          # making the failure cause invisible. Print everything inline.
+          echo "----- kill redis -----"
+          docker compose -f infra/compose/docker-compose.yml --profile agent kill redis || true
+          docker compose -f infra/compose/docker-compose.yml --profile agent ps || true
+          echo "CHECKPOINT 4: redis killed  $(date -Is)"
 
           # Hold Redis down long enough that the simulator definitely tries
           # several events against the dead Redis (each event would normally
           # touch Redis for cooldowns / dedupe / streams).
           sleep "$RESTORE_AFTER"
+          echo "CHECKPOINT 5: dead-redis window over (slept $RESTORE_AFTER s)"
 
-          echo "::group::restore redis"
-          docker compose -f infra/compose/docker-compose.yml --profile agent up -d redis
-          echo "::endgroup::"
+          echo "----- restore redis -----"
+          docker compose -f infra/compose/docker-compose.yml --profile agent up -d redis || true
+          echo "CHECKPOINT 6: redis restored  $(date -Is)"
 
-          # Wait for the simulator to finish.
-          wait "$SIM_PID"
-          SIM_EXIT=$?
-          echo "simulator exit=$SIM_EXIT (informational — not a pass criterion)"
+          # Wait for the simulator to finish. `wait` in bash returns the exit
+          # status of the awaited PID; with `set -u` and no `set -e`, a
+          # non-zero return DOES NOT abort the script — but a missing
+          # SIM_PID variable would. Belt-and-suspenders: default it.
+          : "${SIM_PID:=0}"
+          if [ "$SIM_PID" -gt 0 ]; then
+            wait "$SIM_PID" || true
+            SIM_EXIT=$?
+          else
+            SIM_EXIT=99
+          fi
+          echo "CHECKPOINT 7: wait returned  SIM_EXIT=$SIM_EXIT"
 
           # Dump full sim.log inline (no collapsed group) so the failure reason
           # is visible directly in the step log, not buried in an artifact.
@@ -166,6 +188,8 @@ jobs:
           # Per docs/phase-19-plan.md line 67:
           #   "killing Redis ... does not raise; events land in Postgres;
           #    one degraded-mode warning log appears."
+
+          echo "CHECKPOINT 8: starting §A1 evaluation"
 
           # Criterion 1: no unhandled tracebacks (sim or backend).
           SIM_TRACEBACKS=$(grep -c "Traceback (most recent call last)" sim.log || true)
