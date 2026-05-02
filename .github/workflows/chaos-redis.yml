@@ -1,0 +1,170 @@
+name: Chaos — Redis Kill (Phase 19 §A1)
+
+# Phase 19 verification item #2: the §A1 acceptance test (kill Redis mid-run,
+# simulator --verify must pass) was never re-run on Linux because the developer
+# host is Windows + WSL2, where `getaddrinfo("redis")` against a removed
+# container takes ~3.6s to return NXDOMAIN — that platform quirk is not
+# reproducible on native Linux. This workflow runs the same recipe on a Linux
+# runner so we can close the verification item honestly.
+#
+# Trigger this manually from the Actions tab once the workflow file is on main.
+# Pass criterion:
+#   - Simulator exits 0 (its `--verify` post-condition asserts the expected
+#     incident tree was created in Postgres).
+#   - No `ReadTimeout` / `ConnectError` lines in sim.log (i.e. backend stays
+#     responsive while Redis is dead — the §A1.1 fix wired safe_redis +
+#     bounded socket timeouts so degraded-mode warnings fire instead of
+#     hanging on getaddrinfo).
+#
+# Reproduction recipe traced from docs/phase-19-handoff.md "Test 3".
+
+on:
+  workflow_dispatch:
+    inputs:
+      speed:
+        description: 'Simulator --speed factor (0.1 ≈ 30s compressed run)'
+        required: false
+        default: '0.1'
+      kill_at:
+        description: 'Seconds after simulator start to kill redis'
+        required: false
+        default: '4'
+      restore_after:
+        description: 'Seconds redis stays dead before being restored'
+        required: false
+        default: '25'
+
+concurrency:
+  group: chaos-redis-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  redis-kill:
+    name: simulator + docker compose kill redis
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python + install host-side simulator deps
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install httpx
+        # The simulator drives the backend over HTTP from the host.
+        run: pip install "httpx>=0.27"
+
+      - name: Bring up agent-profile stack (start.sh provisions token)
+        run: |
+          bash start.sh
+          # start.sh already waits for the backend and writes
+          # CCT_AGENT_TOKEN into infra/compose/.env. A second readiness loop
+          # here gives the auto-seed a chance to settle before we hammer it.
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:8000/healthz > /dev/null 2>&1; then
+              echo "backend healthz OK"
+              break
+            fi
+            sleep 2
+          done
+          docker compose -f infra/compose/docker-compose.yml --profile agent ps
+
+      - name: Read CCT_AGENT_TOKEN from .env
+        id: token
+        run: |
+          tok=$(grep '^CCT_AGENT_TOKEN=' infra/compose/.env | head -1 | cut -d= -f2-)
+          if [ -z "$tok" ]; then
+            echo "::error::CCT_AGENT_TOKEN missing from infra/compose/.env after start.sh"
+            exit 1
+          fi
+          # Mask the token in any subsequent log output and pass it via env.
+          echo "::add-mask::$tok"
+          echo "token=$tok" >> "$GITHUB_OUTPUT"
+
+      # NOTE: deliberately *not* calling DELETE /v1/admin/demo-data here.
+      # That endpoint requires `admin` role; the cct-agent token bootstrapped
+      # by start.sh is `analyst` (see start.sh:128). The simulator's --verify
+      # filters incidents by primary_user="alice" + scenario-specific kinds,
+      # so auto-seed scenarios (which use different users) won't false-positive.
+
+      - name: Run scenario + kill Redis mid-run
+        id: chaos
+        env:
+          SIM_TOKEN: ${{ steps.token.outputs.token }}
+          SPEED: ${{ inputs.speed }}
+          KILL_AT: ${{ inputs.kill_at }}
+          RESTORE_AFTER: ${{ inputs.restore_after }}
+        run: |
+          set -uo pipefail
+
+          # Start simulator in background; --verify makes it exit non-zero if
+          # the expected incident tree isn't in Postgres at the end.
+          python -m labs.simulator \
+            --scenario credential_theft_chain \
+            --speed "$SPEED" \
+            --api http://localhost:8000 \
+            --token "$SIM_TOKEN" \
+            --verify \
+            > sim.log 2>&1 &
+          SIM_PID=$!
+          echo "simulator PID=$SIM_PID"
+
+          # Wait briefly for the simulator to start firing, then kill Redis.
+          sleep "$KILL_AT"
+          echo "::group::kill redis"
+          docker compose -f infra/compose/docker-compose.yml --profile agent kill redis
+          docker compose -f infra/compose/docker-compose.yml --profile agent ps
+          echo "::endgroup::"
+
+          # Hold Redis down long enough that the simulator definitely tries
+          # several events against the dead Redis (each event would normally
+          # touch Redis for cooldowns / dedupe / streams).
+          sleep "$RESTORE_AFTER"
+
+          echo "::group::restore redis"
+          docker compose -f infra/compose/docker-compose.yml --profile agent up -d redis
+          echo "::endgroup::"
+
+          # Wait for the simulator to finish (or fail).
+          wait "$SIM_PID"
+          SIM_EXIT=$?
+          echo "simulator exit=$SIM_EXIT"
+
+          echo "::group::sim.log (tail)"
+          tail -80 sim.log || true
+          echo "::endgroup::"
+
+          # Soft pass criterion: no ReadTimeout / ConnectError on the client
+          # side. The §A1.1 fix wired safe_redis + bounded socket timeouts so
+          # degraded-mode warnings fire instead of hanging.
+          if grep -E "ReadTimeout|ConnectError|httpx\\.PoolTimeout|httpx\\.TimeoutException" sim.log; then
+            echo "::error title=Client-side timeout during chaos run::Found timeout/connect errors in simulator output — backend likely hung on getaddrinfo for the dead redis host."
+            exit 1
+          fi
+
+          if [ "$SIM_EXIT" -ne 0 ]; then
+            echo "::error title=Simulator --verify failed::credential_theft_chain didn't produce the expected incident tree after Redis chaos."
+            exit "$SIM_EXIT"
+          fi
+
+      - name: Upload simulator log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chaos-redis-sim-log
+          path: sim.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Capture backend / agent logs on failure
+        if: failure()
+        run: |
+          cd infra/compose
+          docker compose --profile agent logs backend cct-agent --tail 300
+
+      - name: Tear down
+        if: always()
+        run: |
+          cd infra/compose
+          docker compose --profile agent down -v
