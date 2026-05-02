@@ -2,6 +2,8 @@
 
 Living status document. Update as reality changes. Short, current, honest.
 
+Last updated: 2026-05-02 (later in the day) — **Phase 19.5 (chaos testing) STARTED.** Plan written and approved → `docs/phase-19.5-plan.md`. Six chaos scenarios (kill Redis / restart Postgres / network-partition agent / SIGSTOP agent / OOM-kill backend / slow Postgres network) organized as Workstream A1–A6 plus Workstream B (orchestrator + shared eval helper). Two recipe revisions vs the original roadmap: A3 uses `docker network disconnect` instead of `iptables` (CAP_NET_ADMIN unavailable on `ubuntu-latest`); A6 redefined as backend↔Postgres network latency via `tc netem` instead of disk-latency (CAP_SYS_ADMIN unavailable). Greenfield directory: `labs/chaos/{scenarios,lib}/`. Per-scenario shell scripts + per-scenario `chaos-*.yml` workflow_dispatch files + a `labs/chaos/run_chaos.sh` orchestrator. Effort estimate per roadmap: 3–5 days focused. **Done-criteria:** all six green locally AND in CI + regression-injection sanity check (remove `safe_redis` from one detector, confirm A1 fails red).
+
 Last updated: 2026-05-02 — **Phase 19 ✅ FULLY SHIPPED. v0.9 tagged.** Final scorecard: 8 of 9 verification items ✅ closed; item #2 (live Redis chaos test on Linux) **deferred to Phase 19.5** with explicit narrative below. Today's work: PR #8 (smoke workflow fix) and PR #9 (Phase 19 wrap-up — §A7 plan amendment + `chaos-redis.yml` workflow_dispatch + docs deepening) merged to `main`; item #5 closed via plan amendment (≤12/≤10 query budget is the realistic floor — the plan's ≤4 target undercounted the route by one batched aggregate and ignored FastAPI's auth dependency chain that the engine-level `count_queries` listener also sees; collapsing the four batched aggregates into one LEFT-JOIN-GROUP-BY produces a worse plan due to row multiplication across three junction tables); item #2 deferred to Phase 19.5 after three iterations of `chaos-redis.yml` surfaced the right test scaffolding but not a green run inside today's window. Phase 19.5 is the dedicated chaos-testing half-phase already on the roadmap; the workflow file ships now as the §A1 regression gate Phase 19.5 will exercise. The §A1.1 fix itself (bounded socket timeouts on `init_redis`, `safe_redis` circuit breaker, `EventBus._supervisor()` reconnect loop at `bus.py:97-123`) shipped and is verified by the unit-test layer (`backend/tests/integration/test_redis_unavailable.py`). Pattern matches how item #4 closed (1000/s × 60s amended per architectural ceiling, multi-worker uvicorn deferred to Phase 21).
 
 Last updated: 2026-05-01 (session paused mid-verification) — **Two more verification-plan items closed today.** Items #3 (Postgres restart-test live) and #4 (load harness §A6) are now ✅ — see updated scorecard below. Three items still open: #2 (Redis kill on Linux runner — still blocked, do NOT re-run on this WSL2 host; would just reconfirm the known A1.1 platform issue), #5 (hot-route ≤4 reconcile), #7+#8 (PR #6 merge — open in GitHub UI), #10 (v0.9 tag). Session ended before merging PR #6 or pursuing the Linux runner. Stack still up. `infra/compose/.env` has `WAZUH_BRIDGE_ENABLED` flipped `true → false` (matches handoff recommendation for agent-profile + matches `.env.example`). New harness driver scripts at `labs/perf/run_postgres_restart_test.sh`, `labs/perf/run_a6_load_test.sh`, `labs/perf/run_a6_load_test_v2.sh` (untracked, useful for re-runs). Memory entry capturing the day's results: `~/.claude/projects/.../memory/project_phase19_verifications_2026_05_01.md`. Next session pickup: read that memory entry, merge PR #6, find a Linux runner for #2, then resolve #5 and tag #10.
@@ -91,12 +93,11 @@ Last updated: 2026-04-29 — **Phase 17 ✅ FULLY SHIPPED (incl. 17.8 docs/ADR/s
 
 ## What needs to happen next session (pick up here)
 
-**Phase 19 fully shipped 2026-05-02 — `v0.9` tagged.** Next phase per the roadmap is **Phase 19.5 (chaos testing)** — the dedicated half-phase that systematizes failure injection. The first concrete deliverable is the live Redis kill-test verification that today deferred (item #2): the workflow file `.github/workflows/chaos-redis.yml` is already on `main` (commit `8a37227`) and ready for 19.5 to iterate on. Plan: `docs/roadmap-discussion-2026-04-30.md` (also referenced from `docs/phase-19-plan.md`).
+**Phase 19.5 (chaos testing) — STARTED 2026-05-02.** Plan written and approved → `docs/phase-19.5-plan.md`. Six chaos scenarios (A1 kill Redis / A2 restart Postgres / A3 network-partition agent / A4 SIGSTOP agent / A5 OOM-kill backend / A6 slow Postgres network) plus orchestrator + shared eval helper under greenfield `labs/chaos/`. See the dedicated Phase 19.5 entry in the phase-by-phase section below for the scenario table + done-criteria.
 
-**Phase 19.5 inputs the next session inherits:**
-- The chaos-redis workflow exits 1 against `ubuntu-latest` as of 2026-05-02 — three iterations clarified the pass criteria but didn't reach a green run. The workflow is now traced (`set -x` + checkpoint markers) so the failure point will be visible in the next run.
-- Three iterations' worth of design decisions are baked into the workflow file's header comments: `--no-verify` because incident formation isn't part of §A1's bar; the four §A1 counters (sim/backend tracebacks, event_count_5min, degraded warnings) are the actual checks; `chaos-redis-sim-log` artifact is uploaded for downstream forensics.
-- `safe_redis` circuit breaker, bounded `init_redis` socket timeouts, and `EventBus._supervisor()` reconnect loop (`backend/app/streaming/bus.py:97-123`) are in `main`. The unit-test layer (`backend/tests/integration/test_redis_unavailable.py`) verifies them.
+**Phase 19.5 inherited inputs:**
+- `.github/workflows/chaos-redis.yml` ships as the §A1 regression gate (commit `8a37227`). Three iterations on 2026-05-02 clarified the pass criteria (`--no-verify`, four §A1 counters: sim/backend tracebacks, event_count_5min, degraded warnings) but didn't reach a green run inside Phase 19's close-out window — that's exactly the gap Phase 19.5 closes.
+- `safe_redis` circuit breaker, bounded `init_redis` socket timeouts, and `EventBus._supervisor()` reconnect loop (`backend/app/streaming/bus.py:97-123`) are in `main`. The unit-test layer (`backend/tests/integration/test_redis_unavailable.py`) verifies them. Phase 19.5's chaos tests are the *integration-level* regression gate for these primitives.
 
 **Verified 2026-04-29:**
 - **Phase 17 spot-fix aesthetic pass — RESOLVED.** Verification of the surfaces called out in this section (NavBar, HelpMenu, CaseBoard, badge components in layout, welcome `page.tsx`) confirmed they are now fully on dossier tokens (`bg-dossier-stamp`, `border-dossier-paperEdge`, `text-dossier-ink`, `dossier-evidenceTape`); no `bg-zinc-900/50` fallback remains. Most likely repainted during Phase 18.8 work after `frontend-design` was invoked. Other files in the tree still reference zinc (login page, Skeleton, ConfidenceBar, some incident-detail panels) but those are not the Phase 17.2/17.3 surfaces this note was about.
@@ -132,6 +133,29 @@ Last updated: 2026-04-29 — **Phase 17 ✅ FULLY SHIPPED (incl. 17.8 docs/ADR/s
 ---
 
 ## Phase-by-phase state
+
+### Phase 19.5 — 🟡 STARTED 2026-05-02 — Chaos Testing (half-phase)
+
+**Plan:** `docs/phase-19.5-plan.md`
+**Effort estimate:** ~3–5 days focused (per roadmap).
+**Inherited from Phase 19:** the chaos workflow `.github/workflows/chaos-redis.yml` ships as the §A1 regression gate. Phase 19.5 promotes its inline eval block into a shared library + extends the pattern to five more scenarios.
+
+**Six chaos scenarios:**
+
+| # | Scenario | Mechanism | Status |
+|---|---|---|---|
+| A1 | Kill Redis | `docker compose kill redis` mid-`credential_theft_chain --speed 0.1`, restore at t=29s | Workflow shipped (Phase 19); local script pending |
+| A2 | Restart Postgres | `docker compose restart postgres` during 100/s × 30s ingest at t=10s | Perf-script scaffold exists (`labs/perf/run_postgres_restart_test.sh`); chaos-shape port pending |
+| A3 | Network-partition agent → backend | `docker network disconnect` cct-agent for 60s (substitute for `iptables` — CAP_NET_ADMIN unavailable on `ubuntu-latest`) | Greenfield |
+| A4 | SIGSTOP agent | `docker compose pause cct-agent` for 30s | Greenfield (rated EASY per Phase-1 exploration — agent's checkpoint resume is solid) |
+| A5 | OOM-kill backend mid-correlation | `docker compose kill -s SIGKILL backend` at t=10s of credential_theft_chain | Greenfield (rated EASY — correlator is stateless, dedupe key prevents duplicates) |
+| A6 | Slow Postgres network | `tc qdisc add dev eth0 root netem delay 200ms` inside Postgres container during 50/s × 30s ingest. Redefined from "slow disk" because `tc` is network-only and `dm-delay` needs CAP_SYS_ADMIN | Greenfield |
+
+**Done-criteria:** all six scenarios pass on a clean stack — both as 6/6 individual `chaos-*.yml` workflow_dispatch runs green on `ubuntu-latest` AND 6/6 in `labs/chaos/run_chaos.sh` locally. Plus the regression-injection sanity check (remove `safe_redis(...)` decorator from one detector → confirm A1 fails red, proves the harness catches things).
+
+**Greenfield directory:** `labs/chaos/{scenarios,lib}/`. Per-scenario shell scripts + per-scenario `.github/workflows/chaos-*.yml` + a `labs/chaos/run_chaos.sh` orchestrator. Shared four-counter eval helper at `labs/chaos/lib/evaluate.sh`.
+
+---
 
 ### Phase 19 — ✅ FULLY SHIPPED 2026-05-02 — Hardening, CI/CD, Detection-as-Code — `v0.9` tagged
 
