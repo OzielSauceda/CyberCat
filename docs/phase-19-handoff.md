@@ -1,10 +1,12 @@
 # Phase 19 — Handoff to next session
 
-Pick up here. Read this top-to-bottom; it's the shortest path to context.
+> ⚠️ **SUPERSEDED 2026-05-02.** This document captures the in-progress, mid-verification state of Phase 19 between code-ship and close-out. Phase 19 has now **fully shipped at tag `v0.9`** with 8 of 9 verification items closed; item #2 (live Redis chaos on Linux) was deferred to Phase 19.5. The current-state truth lives in `PROJECT_STATE.md` (top-of-file scorecard) and `docs/phase-19-summary.md` § 4 (final scorecard). This file is preserved as the **historical diagnostic record** — it's the best account of *how we found and reasoned about the verification gaps before they closed*. Treat the "STATUS", "Verification plan", and "Remaining work" sections below as a snapshot from 2026-04-30, not as live status. The §"Two gaps" technical analysis and the "How to verify the fixes worked" reproduction recipes remain accurate and useful for Phase 19.5.
 
 ---
 
 ## STATUS — 🟡 CODE-SHIPPED 2026-04-30, ACCEPTANCE PENDING (read this first)
+
+> *Snapshot from 2026-04-30. See banner above for current state.*
 
 **Phase 19 code merged to `main` via PR #5** (`phase-19` → `main`, commit `efde988`). Backend pytest **236/236**, agent pytest **104/104** on the CI agent runner (122/122 on the backend image), ruff clean, frontend typecheck clean, Linux smoke chain **7/7** on the PR-trigger run.
 

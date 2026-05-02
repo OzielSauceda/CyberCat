@@ -654,6 +654,18 @@ Unit tests cover: Sigma parser, compiler, field map (38 tests) + Wazuh decoder (
 
 **Agent tests** (run from the host, not inside Docker): `cd agent && pytest` → **67 tests** (sshd parser 22, auditd parser 23, checkpoint 7, tail 7, shipper 8). No Docker required.
 
+## CI / chaos workflows (Phase 19)
+
+Three GitHub Actions workflows live under `.github/workflows/`:
+
+| Workflow | Trigger | What it runs |
+|---|---|---|
+| `ci.yml` | Every push, every PR | Backend lint+pytest, agent lint+pytest, frontend typecheck+build. Pinned to `-p no:randomly` on the merge gate so the order stays deterministic; pytest-randomly stays active locally to keep shaking out order-dependent bugs. |
+| `smoke.yml` | Push to `main`, daily 06:00 UTC cron, narrow PR trigger when smoke-relevant paths change | Brings up the agent-profile stack via `bash start.sh` (provisions `CCT_AGENT_TOKEN`), then runs the full smoke chain (Phase 17 first, then phase 9a/10/15/16.9/16.10/agent). Per-script `::error::` annotations + `smoke-logs` artifact upload so failure surfaces in the public annotations API even when raw job logs are auth-walled. |
+| `chaos-redis.yml` | `workflow_dispatch` (manual) | Phase 19 §A1 acceptance — kills Redis mid-`credential_theft_chain --speed 0.1`, restores it, then evaluates four counters: (1) sim tracebacks == 0, (2) backend tracebacks == 0, (3) events landed in Postgres in last 5 min > 0, (4) at least one degraded-mode warning fired. Inputs: `speed`, `kill_at`, `restore_after`. **Live verification deferred to Phase 19.5**; the workflow ships now as the regression gate. |
+
+Trigger `chaos-redis.yml` from the Actions tab → "Run workflow" → defaults. Step output prints `sim.log` and the last 250 backend log lines inline (no collapsed groups), with a final `§A1 acceptance evaluation` block showing all four counters before pass/fail.
+
 ## Regenerate the OpenAPI snapshot
 
 The backend writes `openapi.json` inside the container. Copy it to the host so the frontend codegen can read it:

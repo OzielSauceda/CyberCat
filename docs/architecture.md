@@ -249,12 +249,26 @@ Domain action → db.commit() → publish(StreamEvent) → redis.publish(cyberca
                                                useStream hook → refetch on notify
 ```
 
-- `backend/app/streaming/publisher.py` — `publish(event_type, data)` builds the envelope and calls `redis.publish`. Never raises.
-- `backend/app/streaming/bus.py` — `EventBus` holds one Redis pubsub subscriber; fans out to registered per-connection `asyncio.Queue`s.
+- `backend/app/streaming/publisher.py` — `publish(event_type, data)` builds the envelope, wraps the `redis.publish` call in `safe_redis(...)`, and never raises. A Redis blip is logged once per minute and the publish becomes a no-op.
+- `backend/app/streaming/bus.py` — `EventBus` holds one Redis pubsub subscriber, fans out to registered per-connection `asyncio.Queue`s, and runs an `_supervisor()` task (`bus.py:97-123`) that catches consume-loop exceptions, sleeps 2s, and re-subscribes. Registered SSE consumer queues stay registered across reconnects — they just see no events during the outage.
 - `backend/app/api/routers/streaming.py` — `GET /v1/stream` wraps the async generator in a `StreamingResponse`.
 - Frontend: `useStream` hook replaces `usePolling` on all main pages; keeps 60s safety-net polling while SSE is live.
 
-## 9. Deployment shape
+## 9. Resilience and degradation (Phase 19)
+
+Phase 19 made resilience a cross-cutting architectural concern without introducing a new layer. Three primitives cut across layers 3 (detection), 4 (correlation), 5 (storage), and the streaming layer:
+
+- **`safe_redis(...)` helper** — `backend/app/db/redis_state.py`. Wraps Redis ops with `asyncio.wait_for(_OP_TIMEOUT_SEC=3.0)` and a circuit breaker (`_BREAKER_OPEN_SEC=5.0`). On timeout/error, returns a sentinel and logs `redis_degraded rule=<id> op=<name> err=<exc>` once per minute. All four detector rules, the streaming publisher, and the `endpoint_compromise_standalone` SETNX dedup go through it. A Redis outage causes detectors to skip the Redis-backed path cleanly (returning `None`, the documented degraded behavior) rather than crash.
+- **`with_ingest_retry(...)` decorator** — `backend/app/ingest/retry.py`. Retries once on `connection_invalidated` `DBAPIError` from SQLAlchemy. Wraps both the Wazuh poller per-hit ingest AND `POST /v1/events/raw`. With `pool_pre_ping=True` on the engine, a dead Postgres connection raises invalid-state at acquire time; the retry transparently grabs a fresh one.
+- **`EventBus._supervisor()`** — `backend/app/streaming/bus.py:97-123`. Wraps `_consume_once()` in a forever-loop with a 2s reconnect backoff. The "EventBus consumer crashed" / "EventBus reconnect failed" log lines are expected supervisor bookkeeping, not unhandled exceptions.
+
+**The acceptance bar for graceful degradation** (`docs/phase-19-plan.md` line 67): *killing Redis does not raise; events land in Postgres; one degraded-mode warning log appears.* Some derived signals are deliberately weaker during chaos — incidents that need windowed correlation state in Redis won't form for events fired during the outage. That's documented degraded behavior, not a failure.
+
+The Wazuh poller has its own circuit breaker — abort the batch and skip the cursor advance after 10 consecutive transient errors. Prevents a flapping Wazuh manager from corrupting `wazuh_cursor` state.
+
+The chaos test harness lives in `.github/workflows/chaos-redis.yml` (workflow_dispatch on `ubuntu-latest`); see runbook § "CI / chaos workflows" for the four §A1 acceptance counters.
+
+## 10. Deployment shape
 
 - `infra/compose/docker-compose.yml`:
   - implicit core (always-on): `postgres`, `redis`, `backend`, `frontend`
@@ -265,7 +279,7 @@ Domain action → db.commit() → publish(StreamEvent) → redis.publish(cyberca
 - Frontend is a build image (no volume mount) — adding new pages requires `docker compose build frontend`.
 - OpenAPI spec is exported from the running container (`scripts/dump_openapi.py`) and committed. Frontend types regenerated via `npm run gen:api` or `npm run gen:api:file`.
 
-## 9. What we intentionally do not build
+## 11. What we intentionally do not build
 
 - Our own endpoint agent. Wazuh already does agent work; we consume it.
 - Our own log store. Postgres handles structured product data; raw log volume stays in Wazuh.

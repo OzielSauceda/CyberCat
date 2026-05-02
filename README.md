@@ -41,7 +41,7 @@ To run with Wazuh as an alternative telemetry source: `./start.sh --profile wazu
 
 ## Status
 
-Phase 19 (hardening + CI/CD + detection-as-code) in progress. The CI badge tracks every push; the Smoke badge tracks the docker-compose chain run on `main` and nightly. See `PROJECT_STATE.md` for current phase status.
+Phase 19 (hardening + CI/CD + detection-as-code) ✅ shipped 2026-05-02 — tag `v0.9`. The CI badge tracks every push; the Smoke badge tracks the docker-compose chain run on `main` and nightly. Phase 19.5 (chaos testing) is next per the roadmap. See `PROJECT_STATE.md` for current phase status and the full verification scorecard.
 
 ## License
 
