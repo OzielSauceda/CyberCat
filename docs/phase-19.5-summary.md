@@ -51,18 +51,33 @@ The shared evaluation helper at `labs/chaos/lib/evaluate.sh` exports the four-co
 
 ## 5. What's pending
 
-- **Live verification.** All scripts pass `bash -n` syntax check and all workflow YAMLs parse with PyYAML. **None have been executed against a live stack yet.** The first real run of each scenario will probably surface small calibration tweaks (degraded-warnings patterns that need widening, timing windows that need adjustment, maybe one or two scenarios that fail in ways we'll have to triage). That's the "verification phase" still to come.
-- **Regression-injection sanity check.** Once the six scenarios all pass green, the final test is to deliberately break one Phase-19 primitive (e.g. remove `safe_redis(...)` from one detector) and confirm the relevant chaos scenario fails red. If it doesn't, the harness isn't strict enough.
+- **Live verification on operator's stack: ✅ DONE 2026-05-03.** Five of six scenarios (A2/A3/A4/A5/A6) verified locally on Windows + Docker Desktop + WSL2. The orchestrator (`labs/chaos/run_chaos.sh`) returned `OVERALL: PASS` on round 2 (round 1 caught one A4 integration regression — the agent's startup log lines roll out of the 250-line capture window after earlier scenarios run, so the degraded_warnings pattern matched 0 in sequential runs; fix in commit `7cb67ae` made the cursor-advance assertion the real proof and demoted degraded_warnings to informational). First-run findings produced eight concrete calibration improvements, all on `main` (commits `cc0e8bb` + `7cb67ae`):
+  1. `lib/evaluate.sh`: `count_traceback_lines` and `count_degraded_warnings` were emitting `"00"` instead of `"0"` (the `|| echo 0` fallback fired on top of grep+tr's already-printed "0" because pipefail inherited from the caller). Fixed by capturing into a local first.
+  2. `lib/evaluate.sh`: `cleanup_chaos_state` leaked "OCI runtime exec failed: tc" because postgres-alpine has no tc. Now redirects both stdout and stderr.
+  3. A2 (`restart_postgres.sh`): was gating on the load_harness's `acceptance_passed` flag (perf criteria, p95<500ms) — that's wrong for a chaos test where elevated latency during the restart window IS the expected behavior. Replaced with plan §A2 chaos criteria: ≥95% accept, transport_errors < 10 (vs 1992 pre-fix), no orphans, plus a `chaos_proof` signal (failed_5xx > 0 OR p95 > 1s).
+  4. A4 (`pause_agent.sh`): the `docker compose exec cct-agent cat /var/lib/...` call was getting path-mangled by Git Bash on Windows to `C:/Program Files/Git/var/lib/...`. Same workaround Phase 19's perf script uses: prepend `MSYS_NO_PATHCONV=1`.
+  5. A4 + A3: emitter timestamp via `date '+%b %_d %H:%M:%S'` produces local-CDT time, but the agent's sshd parser stores `occurred_at` as UTC. Events looked 5 hours old and fell outside the 5-min counting window. Switched to `date -u`.
+  6. A5 (`oom_backend.sh`): originally ran the simulator from the host, but operator's host has no httpx (Python 3.13 without httpx installed; smoke workflow installs it via `pip` in CI but locally there's none). Switched to `docker cp labs/` into cct-agent + `docker exec` from there — matches the 2026-05-01 chaos pattern in `docs/phase-19-handoff.md` "Test 3".
+  7. A6 (`slow_postgres.sh`): at the original RATE=50/s, sustained 200ms postgres latency × ~6 queries per event burned through the 30-connection pool in ~4s. Backend hit `sqlalchemy.exc.TimeoutError: QueuePool limit of size 20 overflow 10 reached, timeout 10.00`. Plan §A6 risk row predicted exactly this: "Either tighten the harness rate ... or document the new ceiling." Lowered RATE default to 20 (25% headroom). Also demoted `failed_5xx` and `transport_errors` from hard gates to informational — at the pool ceiling there are always transient saturation artifacts that aren't crashes.
+  8. A4: degraded_warnings was matching agent startup log lines that age out of the 250-line capture window during the orchestrator's earlier scenarios. The cursor-advance assertion (`sshd_offset_after > sshd_offset_before`) plus events-landed are the real proof; degraded_warnings is now informational with an inline note explaining why 0 is acceptable.
+
+- **A1 (`kill_redis.sh`) lands.** Remote agent `trig_01NDdyh6syXyAiY9Lz9rjaxd` fires Wed 2026-05-06 at 10:00 CDT. Routine has been retargeted from the original `labs/perf/run_chaos_redis_local.sh` path to align with the canonical `labs/chaos/scenarios/kill_redis.sh` Phase 19.5 layout, and now references `lib/evaluate.sh` so the script doesn't re-implement helpers.
+
+- **Per-scenario CI workflows on `ubuntu-latest`.** Five workflow_dispatch files (`chaos-postgres.yml`, `chaos-partition.yml`, `chaos-pause.yml`, `chaos-oom-backend.yml`, `chaos-slow-postgres.yml`) are on `main`. Operator triggers each once from the Actions tab on first pass to confirm cross-platform parity. Same scripts that passed locally; the CI run is the cross-platform check.
+
+- **Regression-injection sanity check.** Gates on A1 landing. Comment out `safe_redis(...)` from one detector → re-run kill_redis scenario → confirm it FAILS red. Proves the harness catches resilience regressions.
+
 - **CI nightly cron.** Per `docs/phase-19.5-plan.md` § "Verification plan #5", we may opt the chaos workflows into a daily 06:00 UTC cron once they're stable. Costs GH Actions minutes; trade-off is continuous regression coverage. Not done yet.
+
 - **`v0.95` tag.** Optional, per the plan. Could also fold into Phase 20's `v1.0` tag.
 
 ## 6. Where things are right now
 
-`main` carries:
+`main` carries (as of commit `799c347`, end of 2026-05-03 session):
 - The plan (`docs/phase-19.5-plan.md`).
 - Foundation (`labs/chaos/lib/evaluate.sh`, `labs/chaos/README.md`, `labs/chaos/run_chaos.sh`).
-- Five of six scenario scripts (`restart_postgres.sh`, `partition_agent.sh`, `pause_agent.sh`, `oom_backend.sh`, `slow_postgres.sh`) + their matching workflows.
-- A1 (`kill_redis.sh`) is queued — a remote agent scheduled for **Wed 2026-05-06 at 10:00 CDT** is set to land it as a draft PR (routine `trig_01NDdyh6syXyAiY9Lz9rjaxd`, retargeted from an earlier path to match the Phase 19.5 plan's structure).
+- Five of six scenario scripts, all calibrated against live runs (`restart_postgres.sh`, `partition_agent.sh`, `pause_agent.sh`, `oom_backend.sh`, `slow_postgres.sh`) + their matching workflows.
+- A1 (`kill_redis.sh`) queued for Wed 2026-05-06 remote agent.
 
 When A1 lands, all six scenarios are present and the orchestrator's `SKIP` entry for it goes away automatically.
 

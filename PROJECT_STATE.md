@@ -2,6 +2,35 @@
 
 Living status document. Update as reality changes. Short, current, honest.
 
+---
+
+## ⏯ Pick up tomorrow (2026-05-04)
+
+**Where we ended:** Phase 19.5 chaos testing is at 5-of-6 scenarios verified locally. `main` is at commit `799c347`. Stack on the operator's box was up at end of session (`bash start.sh` had been run; chaos scenarios all completed and cleaned up after themselves).
+
+**Concrete next moves, in order:**
+
+1. **(Optional, ~15 min)** Trigger the five `chaos-*.yml` workflows on `ubuntu-latest` from the GitHub Actions tab to confirm they pass cross-platform too. URLs:
+   - https://github.com/OzielSauceda/CyberCat/actions/workflows/chaos-postgres.yml
+   - https://github.com/OzielSauceda/CyberCat/actions/workflows/chaos-partition.yml
+   - https://github.com/OzielSauceda/CyberCat/actions/workflows/chaos-pause.yml
+   - https://github.com/OzielSauceda/CyberCat/actions/workflows/chaos-oom-backend.yml
+   - https://github.com/OzielSauceda/CyberCat/actions/workflows/chaos-slow-postgres.yml
+
+   Each is "Run workflow" → defaults → green button. The chaos-redis.yml is also there but won't pass yet (Phase 19 deferred-item #2 — Wed agent's PR closes it).
+
+2. **Wait for / review the Wed 2026-05-06 remote agent's draft PR** for `labs/chaos/scenarios/kill_redis.sh` (routine `trig_01NDdyh6syXyAiY9Lz9rjaxd`). When it lands, review for plan adherence, merge, and Phase 19.5 has its sixth script.
+
+3. **Regression-injection sanity check** (gates on step 2): in a throwaway branch, comment out the `safe_redis(...)` wrapper around the Redis call in one detector (e.g. `auth_failed_burst`), bring up the stack, run `bash labs/chaos/scenarios/kill_redis.sh`. Expected: the script FAILS red with `degraded_warnings=0` (or with a traceback). That proves the harness catches resilience regressions. Restore the file, no commit needed.
+
+4. **(Optional) Tag `v0.95`** once steps 1–3 are green. Or fold into Phase 20's `v1.0` tag.
+
+**What's NOT pending and shouldn't be re-done:** all five scenario scripts have been calibrated against live runs and the orchestrator returned `OVERALL: PASS` on round 2. The eight concrete calibration fixes are documented in commits `cc0e8bb` + `7cb67ae`. Don't re-litigate them.
+
+**What today produced (full list):** see the dated entries below + `docs/phase-19.5-summary.md` (refreshed) + `CyberCat-Explained.md` §15 bullet 24.
+
+---
+
 Last updated: 2026-05-03 — **Phase 19.5 (chaos testing) — 5 of 6 scenarios VERIFIED LOCALLY.** Live verification done against the operator's Windows + Docker Desktop + WSL2 stack. Standalone runs of A2/A3/A4/A5/A6 all PASS, AND the orchestrator (`labs/chaos/run_chaos.sh`) ran all five sequentially clean (round 2 after one A4 calibration fix). Six concrete calibration findings landed during verification (commits `cc0e8bb` + `7cb67ae`): the `00`/`0` counter bug in `lib/evaluate.sh`, the OCI-runtime stderr leak in `cleanup_chaos_state`, the over-strict harness `acceptance_passed` flag in A2 (replaced with plan §A2 chaos criteria — accept_pct + transport_errors threshold + chaos_proof signal), the Git-Bash MSYS path-mangling for `docker exec ... cat /var/lib/cct-agent/...`, the local-vs-UTC timestamp issue in A3+A4 emitters (agent's sshd parser stores occurred_at as UTC; local `date` strings looked hours-old), the host-httpx-missing fallback in A5 (now uses `docker cp labs/` + `docker exec` cct-agent — matches 2026-05-01 chaos pattern), the A6 RATE=50 → RATE=20 to avoid pool exhaustion (plan §A6 risk row anticipated this), and the A4 degraded_warnings → informational (cursor-advance assertion is the real proof). **A1 (kill_redis.sh) still pending** — Wed 2026-05-06 head-start remote agent (`trig_01NDdyh6syXyAiY9Lz9rjaxd`) is queued to write it. **Regression-injection sanity check pending** — gates on A1 landing first. **CI-side per-workflow verification pending** — requires operator to trigger each `chaos-*.yml` from the Actions tab.
 
 Last updated: 2026-05-02 (later in the day) — **Phase 19.5 (chaos testing) STARTED.** Plan written and approved → `docs/phase-19.5-plan.md`. Six chaos scenarios (kill Redis / restart Postgres / network-partition agent / SIGSTOP agent / OOM-kill backend / slow Postgres network) organized as Workstream A1–A6 plus Workstream B (orchestrator + shared eval helper). Two recipe revisions vs the original roadmap: A3 uses `docker network disconnect` instead of `iptables` (CAP_NET_ADMIN unavailable on `ubuntu-latest`); A6 redefined as backend↔Postgres network latency via `tc netem` instead of disk-latency (CAP_SYS_ADMIN unavailable). Greenfield directory: `labs/chaos/{scenarios,lib}/`. Per-scenario shell scripts + per-scenario `chaos-*.yml` workflow_dispatch files + a `labs/chaos/run_chaos.sh` orchestrator. Effort estimate per roadmap: 3–5 days focused. **Done-criteria:** all six green locally AND in CI + regression-injection sanity check (remove `safe_redis` from one detector, confirm A1 fails red).
