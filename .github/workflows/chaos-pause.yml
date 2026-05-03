@@ -1,0 +1,77 @@
+name: Chaos — Agent Pause/Unpause (Phase 19.5 §A4)
+
+# Phase 19.5 scenario A4: SIGSTOP cct-agent for 30s while events accumulate
+# in lab-debian:/var/log/auth.log. After SIGCONT the agent must resume
+# tailing from its persisted byte-offset cursor (NOT from current EOF) —
+# pause-window events get picked up, just delayed.
+#
+# Exercises Phase 16's atomic checkpoint write + tail.py resume-from-offset.
+#
+# Trigger this manually from the Actions tab.
+
+on:
+  workflow_dispatch:
+    inputs:
+      pause_at:
+        description: 'Seconds before pause'
+        required: false
+        default: '4'
+      pause_duration:
+        description: 'Seconds the agent stays paused'
+        required: false
+        default: '30'
+      emit_duration:
+        description: 'Seconds the sshd-event emitter runs'
+        required: false
+        default: '35'
+
+concurrency:
+  group: chaos-pause-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pause-agent:
+    name: docker compose pause cct-agent + assert cursor advance
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install httpx (host-side; harness uses curl, but smoke deps need it)
+        run: pip install "httpx>=0.27"
+
+      - name: Bring up agent-profile stack
+        run: |
+          bash start.sh
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:8000/healthz > /dev/null 2>&1; then
+              echo "backend healthz OK"
+              break
+            fi
+            sleep 2
+          done
+          docker compose -f infra/compose/docker-compose.yml --profile agent ps
+
+      - name: Run scenario A4 (pause_agent.sh)
+        env:
+          PAUSE_AT: ${{ inputs.pause_at }}
+          PAUSE_DURATION: ${{ inputs.pause_duration }}
+          EMIT_DURATION: ${{ inputs.emit_duration }}
+        run: bash labs/chaos/scenarios/pause_agent.sh
+
+      - name: Capture backend / agent / lab-debian logs on failure
+        if: failure()
+        run: |
+          cd infra/compose
+          docker compose --profile agent logs backend cct-agent lab-debian --tail 300
+
+      - name: Tear down
+        if: always()
+        run: |
+          cd infra/compose
+          docker compose --profile agent down -v

@@ -1,0 +1,78 @@
+name: Chaos — OOM-Kill Backend (Phase 19.5 §A5)
+
+# Phase 19.5 scenario A5: SIGKILL backend mid-credential-theft-chain (after
+# both incidents have formed). Restart backend. Assert that the dedupe path
+# holds — exactly one identity_compromise + exactly one identity_endpoint_chain
+# for alice, no orphan rows.
+#
+# Exercises the correlator's stateless-with-postgres-truth design + Phase 19's
+# with_ingest_retry decorator masking the post-restart pool warmup.
+#
+# Trigger this manually from the Actions tab.
+
+on:
+  workflow_dispatch:
+    inputs:
+      speed:
+        description: 'Simulator --speed factor'
+        required: false
+        default: '0.1'
+      kill_at:
+        description: 'Seconds before SIGKILL (default 20 — after stage-4 t=18s so both incidents exist)'
+        required: false
+        default: '20'
+      kill_recovery:
+        description: 'Seconds before restarting backend'
+        required: false
+        default: '5'
+
+concurrency:
+  group: chaos-oom-backend-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  oom-backend:
+    name: SIGKILL backend mid-correlation + assert dedupe holds
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install httpx (host runs the simulator directly)
+        run: pip install "httpx>=0.27"
+
+      - name: Bring up agent-profile stack
+        run: |
+          bash start.sh
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:8000/healthz > /dev/null 2>&1; then
+              echo "backend healthz OK"
+              break
+            fi
+            sleep 2
+          done
+          docker compose -f infra/compose/docker-compose.yml --profile agent ps
+
+      - name: Run scenario A5 (oom_backend.sh)
+        env:
+          SPEED: ${{ inputs.speed }}
+          KILL_AT: ${{ inputs.kill_at }}
+          KILL_RECOVERY: ${{ inputs.kill_recovery }}
+        run: bash labs/chaos/scenarios/oom_backend.sh
+
+      - name: Capture backend / agent logs on failure
+        if: failure()
+        run: |
+          cd infra/compose
+          docker compose --profile agent logs backend cct-agent --tail 300
+
+      - name: Tear down
+        if: always()
+        run: |
+          cd infra/compose
+          docker compose --profile agent down -v

@@ -1,0 +1,76 @@
+name: Chaos — Postgres Restart (Phase 19.5 §A2)
+
+# Phase 19.5 scenario A2: restart Postgres mid-load and assert that
+# `with_ingest_retry()` + the explicit pool config keep ingest alive.
+# Pre-fix baseline: 0/1992 events accepted, 134s drain. Post-fix bar:
+# ≥95% accept, transport_errors=0, recovery within 30s, no orphan
+# incidents.
+#
+# Trigger this manually from the Actions tab.
+
+on:
+  workflow_dispatch:
+    inputs:
+      rate:
+        description: 'Events per second'
+        required: false
+        default: '100'
+      duration:
+        description: 'Total run duration (seconds)'
+        required: false
+        default: '30'
+      restart_at:
+        description: 'Seconds into run before postgres restart'
+        required: false
+        default: '10'
+
+concurrency:
+  group: chaos-postgres-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  restart-postgres:
+    name: load_harness + docker compose restart postgres
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install httpx (host-side; harness runs inside backend container)
+        run: pip install "httpx>=0.27"
+
+      - name: Bring up agent-profile stack
+        run: |
+          bash start.sh
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:8000/healthz > /dev/null 2>&1; then
+              echo "backend healthz OK"
+              break
+            fi
+            sleep 2
+          done
+          docker compose -f infra/compose/docker-compose.yml --profile agent ps
+
+      - name: Run scenario A2 (restart_postgres.sh)
+        env:
+          RATE: ${{ inputs.rate }}
+          DURATION: ${{ inputs.duration }}
+          RESTART_AT: ${{ inputs.restart_at }}
+        run: bash labs/chaos/scenarios/restart_postgres.sh
+
+      - name: Capture backend logs on failure
+        if: failure()
+        run: |
+          cd infra/compose
+          docker compose --profile agent logs backend cct-agent postgres --tail 300
+
+      - name: Tear down
+        if: always()
+        run: |
+          cd infra/compose
+          docker compose --profile agent down -v
