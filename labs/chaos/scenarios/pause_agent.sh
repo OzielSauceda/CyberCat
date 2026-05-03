@@ -75,7 +75,11 @@ fi
 # ----------------------------------------------------------------------------
 read_checkpoint() {
     local cp_path="$1"
-    docker compose -f "$CHAOS_COMPOSE_FILE" --profile "$CHAOS_COMPOSE_PROFILE" \
+    # MSYS_NO_PATHCONV=1 stops Git Bash on Windows from mangling absolute
+    # Unix paths (it would otherwise rewrite /var/lib/... to
+    # C:/Program Files/Git/var/lib/...). Same trick used by
+    # labs/perf/run_postgres_restart_test.sh.
+    MSYS_NO_PATHCONV=1 docker compose -f "$CHAOS_COMPOSE_FILE" --profile "$CHAOS_COMPOSE_PROFILE" \
         exec -T cct-agent cat "$cp_path" 2>/dev/null \
         | tr -d '\r' \
         || echo "{}"
@@ -118,7 +122,9 @@ EMITTER_LOG="/tmp/cct_chaos_a4_emitter.log"
 emit_sshd_events() {
     local i ts user ip
     for i in $(seq 1 "$EMIT_DURATION"); do
-        ts=$(date '+%b %_d %H:%M:%S')
+        # Use UTC so the agent's sshd parser stores occurred_at consistent
+        # with postgres now() (which is also UTC).
+        ts=$(date -u '+%b %_d %H:%M:%S')
         user="chaosA4_${i}"
         ip="203.0.113.$((1 + (i % 254)))"
         local line="$ts lab-debian sshd[$((10000 + i))]: Failed password for invalid user $user from $ip port $((50000 + i)) ssh2"

@@ -73,12 +73,23 @@ if ! curl -sf http://localhost:8000/healthz > /dev/null 2>&1; then
     echo "FAIL: backend not reachable at http://localhost:8000/healthz — bring up the stack with 'bash start.sh' first"
     exit 1
 fi
-if ! command -v python >/dev/null 2>&1 && ! command -v python3 >/dev/null 2>&1; then
-    echo "FAIL: neither 'python' nor 'python3' on host — A5 runs the simulator from the host"
+# Run the simulator INSIDE the cct-agent container — it already has httpx
+# baked in for the agent code, and running there means killing the backend
+# doesn't kill the simulator. cct-agent's image doesn't have labs/, so we
+# docker cp it in. Matches the 2026-05-01 chaos pattern from the Phase 19
+# verification cycle (docs/phase-19-handoff.md "Test 3").
+AGENT_CONTAINER=$(docker ps --format '{{.Names}}' \
+    | grep -E '(^|-|/)cct-agent(-1)?$' \
+    | head -1 \
+    || true)
+if [ -z "$AGENT_CONTAINER" ]; then
+    echo "FAIL: could not find cct-agent container — A5 runs the simulator there"
     exit 1
 fi
-PY="python"
-command -v python3 >/dev/null 2>&1 && PY="python3" || true
+echo "[$(date +%T)] Detected agent container: $AGENT_CONTAINER"
+echo "[$(date +%T)] Copying labs/ into agent container so the simulator can find scenarios..."
+docker cp labs "${AGENT_CONTAINER}:/app/labs" >/dev/null 2>&1 || \
+    { echo "FAIL: docker cp labs/ into agent container failed"; exit 1; }
 
 # Read the bearer token. Empty string is OK if AUTH_REQUIRED=false; the
 # simulator will simply send no Authorization header.
@@ -119,14 +130,19 @@ else
     SIM_AUTH=()
 fi
 
-echo "[$(date +%T)] Starting simulator (credential_theft_chain --speed $SPEED --no-verify)..."
-$PY -m labs.simulator \
+echo "[$(date +%T)] Starting simulator inside $AGENT_CONTAINER (credential_theft_chain --speed $SPEED --no-verify)..."
+# Use docker exec directly with the container name — docker compose exec
+# wants the service name (cct-agent) but we already have the container
+# name from auto-detection. -w /app sets cwd. MSYS_NO_PATHCONV=1 stops
+# Git Bash from path-mangling the -w argument on Windows.
+( MSYS_NO_PATHCONV=1 docker exec -i -w /app "$AGENT_CONTAINER" \
+    python -m labs.simulator \
     --scenario credential_theft_chain \
     --speed "$SPEED" \
-    --api http://localhost:8000 \
+    --api http://backend:8000 \
     --no-verify \
     "${SIM_AUTH[@]}" \
-    > "$SIM_LOG" 2>&1 &
+    > "$SIM_LOG" 2>&1 ) &
 SIM_PID=$!
 : "${SIM_PID:=0}"
 echo "[$(date +%T)] Simulator PID=$SIM_PID"

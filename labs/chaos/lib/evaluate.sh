@@ -55,11 +55,15 @@ count_traceback_lines() {
         echo 0
         return 0
     fi
-    # `grep -c` exits 1 on no matches; `|| true` handles that without
-    # tripping `pipefail`. `tr -d` strips any stray whitespace.
-    grep -c "Traceback (most recent call last)" "$log_file" 2>/dev/null \
-        | tr -d ' \r\n' \
-        || echo 0
+    # `grep -c` exits 1 on no matches but still prints "0". The previous
+    # version used `|| echo 0` after the pipe, but with `pipefail` inherited
+    # from the caller that fired AND printed "0" — producing "00". Compute
+    # into a local first, then echo once with a sane default.
+    local count
+    count=$(grep -c "Traceback (most recent call last)" "$log_file" 2>/dev/null \
+            | tr -d ' \r\n' \
+            || true)
+    echo "${count:-0}"
 }
 
 # ----------------------------------------------------------------------------
@@ -105,9 +109,12 @@ count_degraded_warnings() {
         echo 0
         return 0
     fi
-    grep -cE "$pattern" "$log_file" 2>/dev/null \
-        | tr -d ' \r\n' \
-        || echo 0
+    # Same fix as count_traceback_lines: compute first, echo once.
+    local count
+    count=$(grep -cE "$pattern" "$log_file" 2>/dev/null \
+            | tr -d ' \r\n' \
+            || true)
+    echo "${count:-0}"
 }
 
 # ----------------------------------------------------------------------------
@@ -187,9 +194,16 @@ cleanup_chaos_state() {
     local cf="$CHAOS_COMPOSE_FILE"
     local pf="$CHAOS_COMPOSE_PROFILE"
 
-    # A6: tc qdisc cleanup. Best-effort; if no qdisc exists, tc returns 2.
+    # A6: tc qdisc cleanup. Best-effort. The postgres image is alpine and
+    # has no `tc` binary, so this exec ALWAYS fails with "executable file
+    # not found in $PATH" — that's expected and harmless. The actual A6 tc
+    # cleanup uses a netshoot sidecar; this branch just covers the rare
+    # case where the postgres image gains tc in the future. Suppress both
+    # stdout AND stderr (docker engine writes "OCI runtime exec failed"
+    # to stderr at the engine level even when the contained command's
+    # stderr is suppressed).
     docker compose -f "$cf" --profile "$pf" exec -T postgres \
-        tc qdisc del dev eth0 root 2>/dev/null || true
+        tc qdisc del dev eth0 root >/dev/null 2>&1 || true
 
     # A3: ensure cct-agent is reconnected to the default compose network.
     # Auto-detect the network name from `docker network ls`.

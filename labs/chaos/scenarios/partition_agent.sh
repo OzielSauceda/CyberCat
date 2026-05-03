@@ -153,7 +153,11 @@ emit_sshd_events() {
     local i ts user ip line
     local emitted=0
     for i in $(seq 1 "$EMIT_DURATION"); do
-        ts=$(date '+%b %_d %H:%M:%S')
+        # Use UTC so the agent's sshd parser stores occurred_at consistent
+        # with postgres now() (which is also UTC). Without -u the host's
+        # local time goes into the auth.log line, the agent interprets it
+        # as UTC, and events look hours-old to count_postgres_events_5min.
+        ts=$(date -u '+%b %_d %H:%M:%S')
         user="chaosA3_$(printf '%03d' "$i")"
         ip="203.0.113.$((1 + (i % 254)))"
         line="$ts lab-debian sshd[$((20000 + i))]: Failed password for invalid user $user from $ip port $((50000 + i)) ssh2"
