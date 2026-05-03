@@ -654,17 +654,54 @@ Unit tests cover: Sigma parser, compiler, field map (38 tests) + Wazuh decoder (
 
 **Agent tests** (run from the host, not inside Docker): `cd agent && pytest` → **67 tests** (sshd parser 22, auditd parser 23, checkpoint 7, tail 7, shipper 8). No Docker required.
 
-## CI / chaos workflows (Phase 19)
+## CI workflows (Phase 19)
 
-Three GitHub Actions workflows live under `.github/workflows/`:
+Two always-on GitHub Actions workflows live under `.github/workflows/`:
 
 | Workflow | Trigger | What it runs |
 |---|---|---|
 | `ci.yml` | Every push, every PR | Backend lint+pytest, agent lint+pytest, frontend typecheck+build. Pinned to `-p no:randomly` on the merge gate so the order stays deterministic; pytest-randomly stays active locally to keep shaking out order-dependent bugs. |
 | `smoke.yml` | Push to `main`, daily 06:00 UTC cron, narrow PR trigger when smoke-relevant paths change | Brings up the agent-profile stack via `bash start.sh` (provisions `CCT_AGENT_TOKEN`), then runs the full smoke chain (Phase 17 first, then phase 9a/10/15/16.9/16.10/agent). Per-script `::error::` annotations + `smoke-logs` artifact upload so failure surfaces in the public annotations API even when raw job logs are auth-walled. |
-| `chaos-redis.yml` | `workflow_dispatch` (manual) | Phase 19 §A1 acceptance — kills Redis mid-`credential_theft_chain --speed 0.1`, restores it, then evaluates four counters: (1) sim tracebacks == 0, (2) backend tracebacks == 0, (3) events landed in Postgres in last 5 min > 0, (4) at least one degraded-mode warning fired. Inputs: `speed`, `kill_at`, `restore_after`. **Live verification deferred to Phase 19.5**; the workflow ships now as the regression gate. |
 
-Trigger `chaos-redis.yml` from the Actions tab → "Run workflow" → defaults. Step output prints `sim.log` and the last 250 backend log lines inline (no collapsed groups), with a final `§A1 acceptance evaluation` block showing all four counters before pass/fail.
+## Chaos workflows (Phase 19.5)
+
+Six manually-triggered chaos workflows under `.github/workflows/chaos-*.yml`. Each one validates that a different Phase-19 resilience primitive (`safe_redis`, `with_ingest_retry`, `EventBus._supervisor`, the agent shipper's bounded retry, the correlator's dedupe key, the Postgres connection pool config) actually holds under live failure injection. Every chaos workflow brings the stack up via `bash start.sh`, runs one scenario script from `labs/chaos/scenarios/`, and tears down on completion.
+
+| Workflow | Scenario | What it does | Pass criteria |
+|---|---|---|---|
+| `chaos-redis.yml` | A1 — kill Redis | `docker compose kill redis` mid-`credential_theft_chain --speed 0.1`, restore at t=29s | sim_tb=0, backend_tb=0, events_5min>0, degraded_warnings>0 (`redis_degraded` / `EventBus consumer crashed`) |
+| `chaos-postgres.yml` | A2 — restart Postgres | `docker compose restart postgres` during 100/s × 30s ingest at t=10s | All four §A1 counters + harness `acceptance_passed` + 0 orphan incidents |
+| `chaos-partition.yml` | A3 — network-partition agent | `docker network disconnect compose-cct-agent-1` for 60s, then reconnect; emitter writes 90 sshd lines into lab-debian during the test | Agent process stays running; ≥80% of `chaosA3_*`-tagged events land in events table after partition heals; shipper logs `ship queue full` / `max retries exhausted` (proves chaos fired) |
+| `chaos-pause.yml` | A4 — SIGSTOP agent | `docker compose pause cct-agent` for 30s while emitter writes sshd lines, then unpause | All four §A1 counters + sshd cursor offset strictly advances post-unpause (proves the agent re-tailed from cursor, not EOF) |
+| `chaos-oom-backend.yml` | A5 — OOM-kill backend | SIGKILL backend at t=20s of credential_theft_chain (after both incidents form), restart, wait for /healthz | Exactly 1 `identity_compromise` + exactly 1 `identity_endpoint_chain` for `alice`; 0 orphan incidents; backend_tb=0 post-restart (proves dedupe key prevents double-correlation) |
+| `chaos-slow-postgres.yml` | A6 — slow Postgres network | `tc netem 200ms` on postgres eth0 via netshoot sidecar; 50/s × 30s ingest | p99 < 5s; achieved_rate ≥ 90% of target; failed_5xx=0; transport_errors=0 (proves the explicit pool config handles sustained per-query latency) |
+
+Trigger any chaos workflow from the Actions tab → "Run workflow" → defaults. Step output prints `sim.log` + last 250 backend log lines inline (no collapsed groups), with a `§A1 acceptance evaluation` block at the end showing the four standard counters + scenario-specific extras before pass/fail.
+
+### Running chaos locally
+
+The same scenario scripts run on the operator's box too. Bring up the stack first (the scripts assume it's already up — they don't call `start.sh` themselves), then invoke:
+
+```bash
+bash start.sh
+
+# One scenario at a time
+bash labs/chaos/scenarios/restart_postgres.sh
+bash labs/chaos/scenarios/pause_agent.sh
+bash labs/chaos/scenarios/oom_backend.sh
+
+# All six sequentially with a settle pause between
+bash labs/chaos/run_chaos.sh
+```
+
+The orchestrator at `labs/chaos/run_chaos.sh` runs the scenarios in roadmap order (A1 → A6), prints a final summary table (scenario / status / duration), and exits 0 only if all green. Override which scenarios run via `SCENARIOS="restart_postgres pause_agent" bash labs/chaos/run_chaos.sh`. Override the inter-scenario pause via `INTER_SCENARIO_PAUSE=20 bash labs/chaos/run_chaos.sh`.
+
+### Two recipe revisions vs the original roadmap
+
+- **A3** uses `docker network disconnect` instead of `iptables`. `iptables` requires `CAP_NET_ADMIN` which `ubuntu-latest` runners don't grant; `docker network disconnect` is functionally equivalent at the container level (TCP hangs cleanly, agent's HTTP client times out, retries fire as designed).
+- **A6** redefined from "slow disk" to "slow Postgres network" via `tc netem` injected by a `nicolaka/netshoot` sidecar with `--net container:<postgres>` + `--cap-add NET_ADMIN`. Real disk-latency injection (`dm-delay`, blkdebug) requires `CAP_SYS_ADMIN` unavailable on `ubuntu-latest`, AND the postgres image is `postgres:16-alpine` with no preinstalled `iproute2`. The sidecar pattern injects the qdisc into postgres's network namespace without modifying postgres's own cap set or the compose config — same observable failure mode (slow Postgres from backend's POV) without the sandbox limitation.
+
+Both substitutions are documented in `docs/phase-19.5-plan.md` § "Calibration vs the roadmap".
 
 ## Regenerate the OpenAPI snapshot
 

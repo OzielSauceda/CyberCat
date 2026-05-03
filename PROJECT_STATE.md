@@ -144,16 +144,27 @@ Last updated: 2026-04-29 — **Phase 17 ✅ FULLY SHIPPED (incl. 17.8 docs/ADR/s
 
 | # | Scenario | Mechanism | Status |
 |---|---|---|---|
-| A1 | Kill Redis | `docker compose kill redis` mid-`credential_theft_chain --speed 0.1`, restore at t=29s | Workflow shipped (Phase 19); local script pending |
-| A2 | Restart Postgres | `docker compose restart postgres` during 100/s × 30s ingest at t=10s | Perf-script scaffold exists (`labs/perf/run_postgres_restart_test.sh`); chaos-shape port pending |
-| A3 | Network-partition agent → backend | `docker network disconnect` cct-agent for 60s (substitute for `iptables` — CAP_NET_ADMIN unavailable on `ubuntu-latest`) | Greenfield |
-| A4 | SIGSTOP agent | `docker compose pause cct-agent` for 30s | Greenfield (rated EASY per Phase-1 exploration — agent's checkpoint resume is solid) |
-| A5 | OOM-kill backend mid-correlation | `docker compose kill -s SIGKILL backend` at t=10s of credential_theft_chain | Greenfield (rated EASY — correlator is stateless, dedupe key prevents duplicates) |
-| A6 | Slow Postgres network | `tc qdisc add dev eth0 root netem delay 200ms` inside Postgres container during 50/s × 30s ingest. Redefined from "slow disk" because `tc` is network-only and `dm-delay` needs CAP_SYS_ADMIN | Greenfield |
+| A1 | Kill Redis | `docker compose kill redis` mid-`credential_theft_chain --speed 0.1`, restore at t=29s | Workflow `chaos-redis.yml` shipped (Phase 19). Host-runnable script `labs/chaos/scenarios/kill_redis.sh` queued — Wed 2026-05-06 remote agent (`trig_01NDdyh6syXyAiY9Lz9rjaxd`) writes it as a draft PR |
+| A2 | Restart Postgres | `docker compose restart postgres` during 100/s × 30s ingest at t=10s | ✅ Script + `chaos-postgres.yml` shipped (commit `5fdf559`) — syntax-clean, awaiting live verification |
+| A3 | Network-partition agent → backend | `docker network disconnect` cct-agent for 60s (substitute for `iptables` — CAP_NET_ADMIN unavailable on `ubuntu-latest`) | ✅ Script + `chaos-partition.yml` shipped (commit `13bd387`) — auto-detects compose network + agent container; ≥80% acceptance threshold; syntax-clean, awaiting live verification |
+| A4 | SIGSTOP agent | `docker compose pause cct-agent` for 30s | ✅ Script + `chaos-pause.yml` shipped (commit `5fdf559`) — verifies all three checkpoint files (sshd hard-required, audit/conntrack informational) advance post-unpause; syntax-clean, awaiting live verification |
+| A5 | OOM-kill backend mid-correlation | `docker compose kill -s SIGKILL backend` at t=20s of credential_theft_chain (after both incidents form) | ✅ Script + `chaos-oom-backend.yml` shipped (commit `5fdf559`) — hard asserts exactly-one identity_compromise + identity_endpoint_chain for alice; syntax-clean, awaiting live verification |
+| A6 | Slow Postgres network | `tc netem 200ms` on postgres `eth0` via `nicolaka/netshoot` sidecar (`--net container:<postgres>` + `--cap-add NET_ADMIN`) during 50/s × 30s ingest. Redefined from "slow disk" because `tc` is network-only, `dm-delay` needs `CAP_SYS_ADMIN`, AND the postgres image is `postgres:16-alpine` (no apt) | ✅ Script + `chaos-slow-postgres.yml` shipped (commit `13bd387`) — sidecar pattern keeps postgres's security posture untouched; p99 < 5s threshold + ≥90% achieved_rate floor; syntax-clean, awaiting live verification |
+
+**Orchestrator + foundation:**
+- `labs/chaos/run_chaos.sh` ✅ shipped — runs all six in roadmap order with INTER_SCENARIO_PAUSE between, prints summary table at end. SKIPs missing scripts (so it works today with A1 still pending).
+- `labs/chaos/lib/evaluate.sh` ✅ shipped — shared four-counter helpers + cleanup_chaos_state trap + log capture + token reader.
 
 **Done-criteria:** all six scenarios pass on a clean stack — both as 6/6 individual `chaos-*.yml` workflow_dispatch runs green on `ubuntu-latest` AND 6/6 in `labs/chaos/run_chaos.sh` locally. Plus the regression-injection sanity check (remove `safe_redis(...)` decorator from one detector → confirm A1 fails red, proves the harness catches things).
 
-**Greenfield directory:** `labs/chaos/{scenarios,lib}/`. Per-scenario shell scripts + per-scenario `.github/workflows/chaos-*.yml` + a `labs/chaos/run_chaos.sh` orchestrator. Shared four-counter eval helper at `labs/chaos/lib/evaluate.sh`.
+**What's left for Phase 19.5 close-out:**
+1. A1 `kill_redis.sh` lands when the Wed remote agent's draft PR is reviewed + merged.
+2. Live verification: each script run individually against the operator's stack — first runs almost certainly surface small calibration tweaks (degraded-warnings patterns, timing windows). Iterate until green.
+3. Per-scenario CI workflow_dispatch run on `ubuntu-latest`, all six green.
+4. Regression-injection sanity check.
+5. (Optional) `v0.95` tag.
+
+**All code is on `main` and syntactically valid (every `bash -n`-checks; every YAML PyYAML-parses), but no scenario has been executed against a live stack yet.** That's deliberately the verification phase still to come.
 
 ---
 
