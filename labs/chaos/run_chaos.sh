@@ -149,5 +149,20 @@ if [ "$OVERALL_FAIL" -ne 0 ]; then
     exit 1
 fi
 
-echo "OVERALL: PASS — all ${#SCENARIO_LIST[@]} scenarios green"
+# Count PASS and SKIP separately so the line is honest when some scripts
+# aren't on disk yet (e.g. A1 kill_redis.sh until the head-start agent lands).
+PASS_COUNT=0
+SKIP_COUNT=0
+for status in "${RESULTS_STATUS[@]}"; do
+    case "$status" in
+        PASS) PASS_COUNT=$((PASS_COUNT + 1)) ;;
+        SKIP) SKIP_COUNT=$((SKIP_COUNT + 1)) ;;
+    esac
+done
+
+if [ "$SKIP_COUNT" -eq 0 ]; then
+    echo "OVERALL: PASS — all ${PASS_COUNT} scenarios green"
+else
+    echo "OVERALL: PASS — ${PASS_COUNT} green, ${SKIP_COUNT} skipped (script not on disk)"
+fi
 exit 0
