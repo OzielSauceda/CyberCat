@@ -1,0 +1,95 @@
+name: Chaos — Slow Postgres Network (Phase 19.5 §A6)
+
+# Phase 19.5 scenario A6: inject 200ms network latency between backend and
+# Postgres via tc/netem inside Postgres's network namespace. Verifies the
+# explicit pool config (pool_size=20, max_overflow=10, pool_timeout=10,
+# pool_pre_ping=True) handles sustained per-query latency.
+#
+# Plan substitution: original "slow disk" recipe required CAP_SYS_ADMIN for
+# dm-delay/blkdebug, unavailable on ubuntu-latest. Redefined as backend↔
+# postgres network latency — same observable failure mode (slow Postgres
+# from backend's POV), available on ubuntu-latest. See
+# docs/phase-19.5-plan.md § "Calibration".
+#
+# Implementation: uses a short-lived `nicolaka/netshoot` sidecar with
+# --net container:<postgres> + --cap-add NET_ADMIN to inject the tc rule
+# into postgres's network namespace WITHOUT modifying postgres's own cap
+# set or compose config. The qdisc persists as long as postgres's net
+# namespace exists; cleanup uses the same sidecar pattern.
+#
+# Trigger this manually from the Actions tab.
+
+on:
+  workflow_dispatch:
+    inputs:
+      rate:
+        description: 'Events per second (lower than A2 because each query +200ms)'
+        required: false
+        default: '50'
+      duration:
+        description: 'Run duration (seconds)'
+        required: false
+        default: '30'
+      latency_ms:
+        description: 'Injected one-way latency on postgres eth0 (ms)'
+        required: false
+        default: '200'
+      p99_threshold_ms:
+        description: 'Plan §A6 acceptance ceiling for p99 detection latency (ms)'
+        required: false
+        default: '5000'
+
+concurrency:
+  group: chaos-slow-postgres-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  slow-postgres:
+    name: tc netem 200ms on postgres eth0 + assert p99 < 5s
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install httpx
+        run: pip install "httpx>=0.27"
+
+      - name: Pre-pull netshoot image (avoid pull time inside the chaos window)
+        run: docker pull nicolaka/netshoot
+
+      - name: Bring up agent-profile stack
+        run: |
+          bash start.sh
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:8000/healthz > /dev/null 2>&1; then
+              echo "backend healthz OK"
+              break
+            fi
+            sleep 2
+          done
+          docker compose -f infra/compose/docker-compose.yml --profile agent ps
+
+      - name: Run scenario A6 (slow_postgres.sh)
+        env:
+          RATE: ${{ inputs.rate }}
+          DURATION: ${{ inputs.duration }}
+          LATENCY_MS: ${{ inputs.latency_ms }}
+          P99_THRESHOLD_MS: ${{ inputs.p99_threshold_ms }}
+        run: bash labs/chaos/scenarios/slow_postgres.sh
+
+      - name: Capture backend / postgres logs on failure
+        if: failure()
+        run: |
+          cd infra/compose
+          docker compose --profile agent logs backend postgres --tail 300
+
+      - name: Tear down
+        if: always()
+        run: |
+          cd infra/compose
+          docker compose --profile agent down -v
