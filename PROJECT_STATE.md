@@ -4,24 +4,11 @@ Living status document. Update as reality changes. Short, current, honest.
 
 ---
 
-## ⏯ Pick up tomorrow (2026-05-04) — **Phase 19.7 Consolidation Sprint starts**
+## ⏯ Pick up tomorrow (2026-05-04)
 
-**Why the sprint exists:** the operator surfaced a real concern 2026-05-03 — the project is impressive, but a lot of the code was vibe-coded with heavy AI assistance, and conceptual retention has lagged the build velocity. Restarting the project would be the wrong cure (re-builds the same gap with the same process); pausing feature work for a structured re-read is the right one. **Phase 20 (heavy-hitter scenarios) is paused until Phase 19.7 closes.**
+**Direction reset 2026-05-03 (later):** the consolidation-sprint idea was floated and dismissed. Operator decided to keep building (vibecode mode continues) and instead apply CLAUDE.md §9 teaching beats more deliberately on every new phase from here on. Retrospective deep-learning is deferred to project end. The Phase 0 walkthrough produced today (`docs/walkthroughs/phase-0-walkthrough.md`) stays as a one-off historical artifact; no further per-phase retrospectives until the project wraps. Sprint commits (`bd390ed`, `4c73a53`) remain in git history.
 
-**The plan:** `docs/learning-plan.md` (just shipped). Four weeks, day-by-day. Daily output is a walkthrough section in `docs/walkthroughs.md` (just shipped, skeleton in place) or a learning-notes expansion. Weekends are reserved for a parallel public mini-project (FastAPI + Postgres + Redis, no AI). Daily commits come from the sprint itself — no streak gaming. Sprint exit criterion: operator can answer "what happens when an sshd login failure arrives at the agent until the analyst sees an incident in the UI" without looking.
-
-**Phase 19.5 close-out items still on their own track (~75 min total, threaded through the sprint):**
-1. **Wed 2026-05-06 remote agent's draft PR** for `labs/chaos/scenarios/kill_redis.sh` (routine `trig_01NDdyh6syXyAiY9Lz9rjaxd`) — review, merge if clean.
-2. **Regression-injection sanity check** — comment out `safe_redis(...)` in one detector, run kill_redis.sh, expect FAIL red. Restore. Gates on (1).
-3. **(Optional) Trigger the 5 chaos-*.yml workflows** from the GitHub Actions tab to confirm cross-platform pass.
-
-**Day 1 (Mon 2026-05-04) — Project identity & decisions.** Reading list: `CLAUDE.md` § 1–9, `Project Brief.md`, ADRs 0001 / 0002 / 0003. Output: `docs/walkthroughs.md` § "Slice 0 — What CyberCat is and isn't" — 200–400 word operator-voice summary in your own words. Commit message: `docs: walkthrough slice 0 — project identity and ADR rationale`. See `docs/learning-plan.md` for the full week-by-week + day-by-day breakdown.
-
----
-
-## ⏯ Where we ended 2026-05-03 (carried forward)
-
-**Where we ended:** Phase 19.5 chaos testing is at 5-of-6 scenarios verified locally. `main` is at commit `799c347`. Stack on the operator's box was up at end of session (`bash start.sh` had been run; chaos scenarios all completed and cleaned up after themselves).
+**Where we ended on Phase 19.5:** 5-of-6 scenarios verified locally. `main` is at commit `4c73a53`. Stack on the operator's box was up at end of session (`bash start.sh` had been run; chaos scenarios all completed and cleaned up after themselves).
 
 **Concrete next moves, in order:**
 
