@@ -686,6 +686,7 @@ The same scenario scripts run on the operator's box too. Bring up the stack firs
 bash start.sh
 
 # One scenario at a time
+bash labs/chaos/scenarios/kill_redis.sh
 bash labs/chaos/scenarios/restart_postgres.sh
 bash labs/chaos/scenarios/pause_agent.sh
 bash labs/chaos/scenarios/oom_backend.sh
@@ -693,6 +694,10 @@ bash labs/chaos/scenarios/oom_backend.sh
 # All six sequentially with a settle pause between
 bash labs/chaos/run_chaos.sh
 ```
+
+> **Operational gotcha:** if you re-run chaos scenarios back-to-back, give the stack a minute or run `docker compose --profile agent restart backend` between runs. The `EventBus._supervisor()` reconnect loop can wedge after a chaos run and make the backend unresponsive (curl hangs even though `docker ps` shows it "Up"). This bit a 2026-05-04 verification session — the first kill_redis.sh ran cleanly, then subsequent runs hung at the banner because the backend wasn't accepting new connections. Restart fixes it instantly.
+
+> **WSL2 platform quirk for A1 (`kill_redis.sh`):** on Windows + WSL2, `getaddrinfo("redis")` takes ~3.6s to return NXDOMAIN when the redis container is gone (vs near-instant on real Linux). This spikes `transport_errors` and drops `accept_pct` during the dead-redis window. The script's accept_pct and transport_errors gates are *informational on local*, not pass/fail criteria — only the four §A1 counters (sim/backend tracebacks, event_count_5min, degraded_warnings) gate. The CI workflow on `ubuntu-latest` doesn't have this quirk.
 
 The orchestrator at `labs/chaos/run_chaos.sh` runs the scenarios in roadmap order (A1 → A6), prints a final summary table (scenario / status / duration), and exits 0 only if all green. Override which scenarios run via `SCENARIOS="restart_postgres pause_agent" bash labs/chaos/run_chaos.sh`. Override the inter-scenario pause via `INTER_SCENARIO_PAUSE=20 bash labs/chaos/run_chaos.sh`.
 

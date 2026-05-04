@@ -197,3 +197,32 @@ After done-criteria is hit, tag `v0.95` against the merge commit (optional — o
 - (conditional) `docs/decisions/ADR-NNNN-chaos-harness-shape.md` if any architectural choice surfaces during implementation that warrants durable record (e.g. Postgres-backed correlator dedupe, on-disk shipper spool)
 
 **Estimated effort:** ~3–5 days of focused work per the roadmap. Scenarios A1+A2 are mostly port-the-existing-thing; A4+A5 are easy per the technical-viability investigation; A3 needs careful tuning of the partition window vs the shipper's 5-retry cap; A6 needs a one-time apt install inside the postgres container (or could ship via a small Dockerfile delta on the postgres service).
+
+---
+
+## Closing notes — Phase 19.5 shipped
+
+> *Appended 2026-05-04 after Phase 19.5 closure. Plan content above is preserved as-written; this section is the after-the-fact "what actually happened" gloss.*
+
+**Closed:** 2026-05-04 (closure commit `72d467d`). Total elapsed from plan approval: 3 calendar days (2026-05-02 → 2026-05-04), spread across three sessions.
+
+**Done-criteria met both directions:**
+- All six scenarios green locally — A2/A3/A4/A5/A6 verified 2026-05-03 (round 2 orchestrator PASS, commit `799c347`); A1 verified 2026-05-04 (kill_redis.sh standalone PASS, commit `6be162f`).
+- Regression-injection sanity check (Verification plan #4) passed: bypassed `safe_redis()` on `auth_failed_burst.py:41`, re-ran kill_redis.sh, observed FAIL with `degraded_warnings=0` exactly as predicted. Restored cleanly.
+
+**Calibration found vs. the plan:** ten concrete fixes total (eight on 2026-05-03 in commits `cc0e8bb` + `7cb67ae`, two on 2026-05-04 in commit `6be162f`). All documented in `docs/phase-19.5-summary.md` § 5. The two 2026-05-04 fixes specific to A1: time-window backend-log capture (`--since 2m`) replaces the 250-line tail (which was burying `redis_degraded` and `EventBus consumer crashed` lines under SQLAlchemy echo at ~12k lines per run); accept_pct and transport_errors demoted to informational on local because Windows+WSL2 has a 3.6s `getaddrinfo("redis")` NXDOMAIN quirk that the §A1 plan implicitly assumed wasn't there.
+
+**Recipes that held up vs. the plan:**
+- **A3** `docker network disconnect` substitution — held. Agent's bounded retry queue + drop-oldest overflow worked exactly as designed; 88/90 events landed (97%) post-reconnect.
+- **A6** `tc netem 200ms` via netshoot sidecar — held, with one calibration: at the original RATE=50/s, sustained 200ms latency × ~6 queries per event burned through the 30-conn pool in ~4s. Plan §A6 risk row predicted this; lowered to RATE=20.
+
+**What stayed strict and what went informational:**
+- Strict (the four §A1 counters): `sim_tracebacks=0`, `backend_tracebacks=0`, `event_count_5min>0`, `degraded_warnings>0`. These gate every scenario's pass/fail.
+- Informational (scenario-specific extras): A2's `chaos_proof` signal (failed_5xx OR p95>1s), A1's `accept_pct` / `transport_errors` (WSL2 quirk), A4's `degraded_warnings` (cursor-advance is the real proof for that one).
+
+**Optional follow-ups deferred at closure** — none of these block "Phase 19.5 done":
+1. Per-scenario CI workflow runs on `ubuntu-latest`. The five non-redis workflows (postgres/partition/pause/oom/slow-postgres) likely pass; `chaos-redis.yml` would need a §B3-style refactor to source `lib/evaluate.sh` and adopt the calibrated logic before triggering, since its current inline eval is the original Phase-19 version that failed three times on 2026-05-02.
+2. CI nightly cron (Verification plan #5).
+3. `v0.95` tag, or fold into Phase 20's `v1.0`.
+
+**Operational gotcha for future runners:** after a chaos run that wedges the EventBus reconnect loop, the backend can become unresponsive (`curl` hangs) even though `docker ps` shows it "Up." Symptom: scenarios run successfully once, then subsequent runs hang at the banner. Fix: `docker compose --profile agent restart backend`. Worth giving the stack a minute or doing an explicit restart between back-to-back orchestrator runs. Documented in `docs/runbook.md` § "Running chaos locally."
