@@ -4,9 +4,36 @@ Living status document. Update as reality changes. Short, current, honest.
 
 ---
 
-## ⏯ Phase 19.5 — ✅ FULLY VERIFIED LOCALLY 2026-05-04
+## ⏯ Pick up tomorrow (2026-05-05)
 
-**Closed today (2026-05-04 evening session).** All 6 chaos scenarios verified plus the regression-injection sanity check passed both directions. Local `main` is at `6be162f` (the A1 calibration commit) plus a forthcoming Phase-19.5-closure commit. Three commits sit unpushed (`4c73a53`, `2793dbd`, `6be162f`, plus the closure commit) — operator pushes manually.
+**Where main is:** `86966f0` on `origin/main`. Everything from today is pushed. Working tree clean (only `randomPrompt.md` shows as modified, pre-existing).
+
+**Today's two big things:**
+1. **Phase 19.5 closed** — all 6 chaos scenarios green locally + regression-injection sanity check passed both directions (broke `safe_redis`, harness FAILed correctly with `degraded_warnings=0`).
+2. **End-to-end health check pre-Phase-20** — 236 backend tests + 103 agent tests + 7 smoke flows + API surface (36 endpoints) all green. One real bug surfaced and fixed: `labs/smoke_test_phase13.sh` had hardcoded `2026-01-01` timestamps that Phase 19's input validation rejects (>30 days past). Replaced with now-relative `date -u -d "N minutes ago"`. Commit `86966f0`.
+
+**Next phase: Phase 20 — heavy-hitter choreographed scenarios.** Five named scenarios: `lateral_movement_chain`, `crypto_mining_payload`, `webshell_drop`, `ransomware_staging`, `cloud_token_theft_lite`. Plus operator drills + merge/split incidents. Adds product surface (unlike 19/19.5 which were verification phases).
+
+**Recommended workflow for Phase 20: feature branch + PR.** Following the Phase 17/18/19 pattern, not the 19.5 direct-push pattern. Suggested branch: `phase-20-heavy-hitter-scenarios`. Why: multi-day effort, multi-commit, you'd want CI gating *before* main, you'd want a single PR description as the chapter heading, and a clean rollback unit if a scenario goes sideways.
+
+**Day-1 startup commands:**
+```bash
+bash start.sh                        # bring stack up
+git checkout -b phase-20-heavy-hitter-scenarios   # branch off origin/main = 86966f0
+# then ask Claude to draft docs/phase-20-plan.md as the §9 before-pass
+```
+
+**Operational reminders that bit us today (don't repeat):**
+- After chaos work that wedges the EventBus, `docker compose --profile agent restart backend` clears it. Curl can hang on `/healthz` even when `docker ps` shows "Up."
+- Phase 13 smoke test truncates the DB; Phase 17 expects fresh seed state. Run them in isolation with state resets between, not chained.
+
+**Optional deferred items (not blocking Phase 20):** trigger the 5 non-redis `chaos-*.yml` workflows from GitHub Actions tab for cross-platform Linux confirmation; tag `v0.95` or roll into Phase 20's `v1.0`; refactor `chaos-redis.yml` to source `lib/evaluate.sh` if you want A1 verified on Linux too (~30-45 min).
+
+---
+
+## ⏯ Phase 19.5 — ✅ FULLY VERIFIED LOCALLY 2026-05-04 (closure detail)
+
+**Closed 2026-05-04 evening session.** All 6 chaos scenarios verified plus the regression-injection sanity check passed both directions. All commits pushed to origin/main as of session end.
 
 **A1 (kill_redis) standalone result on this Windows + WSL2 + Docker Desktop host:**
 ```
