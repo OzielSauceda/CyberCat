@@ -4,11 +4,43 @@ Living status document. Update as reality changes. Short, current, honest.
 
 ---
 
-## ⏯ Pick up tomorrow (2026-05-04)
+## ⏯ Phase 19.5 — ✅ FULLY VERIFIED LOCALLY 2026-05-04
 
-**Direction reset 2026-05-03 (later):** the consolidation-sprint idea was floated and dismissed. Operator decided to keep building (vibecode mode continues) and instead apply CLAUDE.md §9 teaching beats more deliberately on every new phase from here on. Retrospective deep-learning is deferred to project end. The Phase 0 walkthrough produced today (`docs/walkthroughs/phase-0-walkthrough.md`) stays as a one-off historical artifact; no further per-phase retrospectives until the project wraps. Sprint commits (`bd390ed`, `4c73a53`) remain in git history.
+**Closed today (2026-05-04 evening session).** All 6 chaos scenarios verified plus the regression-injection sanity check passed both directions. Local `main` is at `6be162f` (the A1 calibration commit) plus a forthcoming Phase-19.5-closure commit. Three commits sit unpushed (`4c73a53`, `2793dbd`, `6be162f`, plus the closure commit) — operator pushes manually.
 
-**Where we ended on Phase 19.5:** 5-of-6 scenarios verified locally. `main` is at commit `4c73a53`. Stack on the operator's box was up at end of session (`bash start.sh` had been run; chaos scenarios all completed and cleaned up after themselves).
+**A1 (kill_redis) standalone result on this Windows + WSL2 + Docker Desktop host:**
+```
+sim_tracebacks     = 0      ✓
+backend_tracebacks = 0      ✓
+event_count_5min   = 1228   ✓ (events landed during the dead-redis window)
+degraded_warnings  = 2      ✓ (redis_degraded + EventBus consumer crashed)
+PASS: §A1 acceptance met — accept_pct=48% informational on WSL2 (DNS quirk)
+```
+
+**Regression-injection sanity check — passed (i.e. the harness correctly caught a deliberately-broken safe_redis):**
+```
+Bypassed safe_redis on auth_failed_burst.py:41 (replaced with raw redis.incr).
+Rebuilt backend, re-ran kill_redis.sh:
+  degraded_warnings = 0  ← exactly the failure mode plan §"Verification plan #4" predicted
+  FAIL: §A1 acceptance NOT met
+File restored via git checkout, backend rebuilt clean.
+```
+
+**Calibration findings landed today (commit `6be162f`):**
+1. The 250-line backend log tail buried `redis_degraded` and `EventBus consumer crashed` lines under SQLAlchemy echo (~20 INFO lines per event × ~600 events = ~12k SQL log lines for one run). Switched to `--since 2m` time-window capture.
+2. `accept_pct >= 95%` and `transport_errors < 1` were over-spec'd in the first draft (modeled on restart_postgres.sh). The §A1 plan defines pass as the four counters only — accept_pct/transport_errors are A2-flavor signals. On Windows+WSL2 specifically, `getaddrinfo("redis")` takes ~3.6s to NXDOMAIN (vs near-instant on Linux), spiking transport_errors during the dead-redis window. Documented platform quirk; CI runs on `ubuntu-latest` where it doesn't apply. accept_pct/transport_errors stay PRINTED but not gated.
+
+**Direction reset 2026-05-03 (carried forward):** the consolidation-sprint idea was floated and dismissed. Operator chose to keep build velocity and apply CLAUDE.md §9 teaching beats more deliberately on each new phase. Retrospective deep-learning deferred to project end. Sprint commits (`bd390ed`, `4c73a53`) remain in git history; `docs/walkthroughs/phase-0-walkthrough.md` is a one-off historical artifact.
+
+**Optional, deferred to operator:** trigger the 5 `chaos-*.yml` workflows from the GitHub Actions tab once for cross-platform confirmation. Not required for the Phase 19.5 done-criteria — those criteria were "all six green locally + regression-injection sanity check," both met today.
+
+**Next phase:** Phase 20 — heavy-hitter choreographed scenarios (`lateral_movement_chain`, `crypto_mining_payload`, `webshell_drop`, `ransomware_staging`, `cloud_token_theft_lite`) + operator drills + merge/split incidents. Plan to be drafted when the operator is ready to start. Optional `v0.95` tag when convenient (or roll into Phase 20's `v1.0`).
+
+---
+
+## ⏯ Where we ended 2026-05-03 (carried forward)
+
+**Where we ended:** Phase 19.5 chaos testing was at 5-of-6 scenarios verified locally. `main` was at commit `799c347`. Stack on the operator's box was up at end of session (`bash start.sh` had been run; chaos scenarios all completed and cleaned up after themselves).
 
 **Concrete next moves, in order:**
 
