@@ -83,18 +83,27 @@ curl -s "${AUTH_HEADER[@]}" -N "${API}/v1/stream" > "$STREAM_LOG" &
 STREAM_PID=$!
 sleep 1
 
+# Phase 19's input validation rejects events whose occurred_at is more
+# than 30 days in the past, so use now-relative ISO-8601 timestamps
+# (UTC). The temporal spacing inside this scenario is fictitious anyway
+# — the detectors key on real-time arrival, not occurred_at — so we
+# just need three recent, ordered values for the events table.
+T0=$(date -u -d "3 minutes ago" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-3M +%Y-%m-%dT%H:%M:%SZ)
+T1=$(date -u -d "2 minutes ago" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-2M +%Y-%m-%dT%H:%M:%SZ)
+T2=$(date -u -d "1 minute ago"  +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-1M +%Y-%m-%dT%H:%M:%SZ)
+
 # Trigger identity_compromise correlator via direct API calls
 # (matches the pattern used in test_propose_action_emits_event:
 #  2x auth.failed + 1x auth.succeeded for same user/source_ip)
 curl -s "${AUTH_HEADER[@]}" -X POST "${API}/v1/events/raw" \
     -H "Content-Type: application/json" \
-    -d '{"source":"direct","kind":"auth.failed","occurred_at":"2026-01-01T11:00:00Z","raw":{},"normalized":{"user":"smoke-scenario","source_ip":"5.5.5.5","auth_type":"password"},"dedupe_key":"smoke-scenario-af-1"}' > /dev/null
+    -d "{\"source\":\"direct\",\"kind\":\"auth.failed\",\"occurred_at\":\"${T0}\",\"raw\":{},\"normalized\":{\"user\":\"smoke-scenario\",\"source_ip\":\"5.5.5.5\",\"auth_type\":\"password\"},\"dedupe_key\":\"smoke-scenario-af-1\"}" > /dev/null
 curl -s "${AUTH_HEADER[@]}" -X POST "${API}/v1/events/raw" \
     -H "Content-Type: application/json" \
-    -d '{"source":"direct","kind":"auth.failed","occurred_at":"2026-01-01T11:00:30Z","raw":{},"normalized":{"user":"smoke-scenario","source_ip":"5.5.5.5","auth_type":"password"},"dedupe_key":"smoke-scenario-af-2"}' > /dev/null
+    -d "{\"source\":\"direct\",\"kind\":\"auth.failed\",\"occurred_at\":\"${T1}\",\"raw\":{},\"normalized\":{\"user\":\"smoke-scenario\",\"source_ip\":\"5.5.5.5\",\"auth_type\":\"password\"},\"dedupe_key\":\"smoke-scenario-af-2\"}" > /dev/null
 curl -s "${AUTH_HEADER[@]}" -X POST "${API}/v1/events/raw" \
     -H "Content-Type: application/json" \
-    -d '{"source":"direct","kind":"auth.succeeded","occurred_at":"2026-01-01T11:01:00Z","raw":{},"normalized":{"user":"smoke-scenario","source_ip":"5.5.5.5","auth_type":"password"},"dedupe_key":"smoke-scenario-as-1"}' > /dev/null
+    -d "{\"source\":\"direct\",\"kind\":\"auth.succeeded\",\"occurred_at\":\"${T2}\",\"raw\":{},\"normalized\":{\"user\":\"smoke-scenario\",\"source_ip\":\"5.5.5.5\",\"auth_type\":\"password\"},\"dedupe_key\":\"smoke-scenario-as-1\"}" > /dev/null
 
 sleep 3
 kill "$STREAM_PID" 2>/dev/null || true
@@ -122,9 +131,10 @@ FILTER_PID=$!
 sleep 0.5
 
 # Publish an incident-related event via ingest (single-event format)
+T_TOPIC=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 curl -s "${AUTH_HEADER[@]}" -X POST "${API}/v1/events/raw" \
     -H "Content-Type: application/json" \
-    -d '{"source":"direct","kind":"auth.failed","occurred_at":"2026-01-01T12:00:00Z","raw":{},"normalized":{"user":"smoke-topic-test","source_ip":"9.9.9.9","auth_type":"password"},"dedupe_key":"smoke-topic-filter-1"}' > /dev/null
+    -d "{\"source\":\"direct\",\"kind\":\"auth.failed\",\"occurred_at\":\"${T_TOPIC}\",\"raw\":{},\"normalized\":{\"user\":\"smoke-topic-test\",\"source_ip\":\"9.9.9.9\",\"auth_type\":\"password\"},\"dedupe_key\":\"smoke-topic-filter-1\"}" > /dev/null
 
 sleep 2
 kill "$FILTER_PID" 2>/dev/null || true
@@ -160,15 +170,18 @@ sleep 0.5
 
 # Trigger detection.fired via ingest — needs the 3-event pattern (single auth.failed
 # alone doesn't fire any detection rule; auth_anomalous_source_success fires on auth.succeeded)
+F0=$(date -u -d "3 minutes ago" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-3M +%Y-%m-%dT%H:%M:%SZ)
+F1=$(date -u -d "2 minutes ago" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-2M +%Y-%m-%dT%H:%M:%SZ)
+F2=$(date -u -d "1 minute ago"  +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-1M +%Y-%m-%dT%H:%M:%SZ)
 curl -s "${AUTH_HEADER[@]}" -X POST "${API}/v1/events/raw" \
     -H "Content-Type: application/json" \
-    -d '{"source":"direct","kind":"auth.failed","occurred_at":"2026-01-01T13:00:00Z","raw":{},"normalized":{"user":"fanout-user","source_ip":"1.2.3.5","auth_type":"password"},"dedupe_key":"smoke-fanout-af-1"}' > /dev/null
+    -d "{\"source\":\"direct\",\"kind\":\"auth.failed\",\"occurred_at\":\"${F0}\",\"raw\":{},\"normalized\":{\"user\":\"fanout-user\",\"source_ip\":\"1.2.3.5\",\"auth_type\":\"password\"},\"dedupe_key\":\"smoke-fanout-af-1\"}" > /dev/null
 curl -s "${AUTH_HEADER[@]}" -X POST "${API}/v1/events/raw" \
     -H "Content-Type: application/json" \
-    -d '{"source":"direct","kind":"auth.failed","occurred_at":"2026-01-01T13:00:30Z","raw":{},"normalized":{"user":"fanout-user","source_ip":"1.2.3.5","auth_type":"password"},"dedupe_key":"smoke-fanout-af-2"}' > /dev/null
+    -d "{\"source\":\"direct\",\"kind\":\"auth.failed\",\"occurred_at\":\"${F1}\",\"raw\":{},\"normalized\":{\"user\":\"fanout-user\",\"source_ip\":\"1.2.3.5\",\"auth_type\":\"password\"},\"dedupe_key\":\"smoke-fanout-af-2\"}" > /dev/null
 curl -s "${AUTH_HEADER[@]}" -X POST "${API}/v1/events/raw" \
     -H "Content-Type: application/json" \
-    -d '{"source":"direct","kind":"auth.succeeded","occurred_at":"2026-01-01T13:01:00Z","raw":{},"normalized":{"user":"fanout-user","source_ip":"1.2.3.5","auth_type":"password"},"dedupe_key":"smoke-fanout-as-1"}' > /dev/null
+    -d "{\"source\":\"direct\",\"kind\":\"auth.succeeded\",\"occurred_at\":\"${F2}\",\"raw\":{},\"normalized\":{\"user\":\"fanout-user\",\"source_ip\":\"1.2.3.5\",\"auth_type\":\"password\"},\"dedupe_key\":\"smoke-fanout-as-1\"}" > /dev/null
 
 sleep 3
 kill "$PID1" 2>/dev/null || true
