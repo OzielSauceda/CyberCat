@@ -113,11 +113,16 @@ Every scenario lives at `labs/simulator/scenarios/<name>.py`, follows the `crede
 3. `network.connection` host-1 → 198.51.100.88:443.
 4. `auth.succeeded` host-cloud — alice from cloud-NAT-IP (synthetic; first time alice has logged in from this src).
 
-**Acceptance (must_fire):** `py.process.suspicious_child` (cat|curl chain), `py.blocked_observable_match` (exfil IP), `py.auth.anomalous_source_success` (final cloud login). **Correlators:** `endpoint_compromise_standalone` (host-1), `identity_compromise` (alice on host-cloud), `identity_endpoint_chain` (cross-layer alice).
+**Acceptance (must_fire):** `py.blocked_observable_match` (fires on stages 2 and 3 — cmdline + dst_ip both reference the pre-seeded exfil IP). **must_not_fire:** `py.process.suspicious_child` (Linux gap), `py.auth.failed_burst` (no failures in chain), `py.auth.anomalous_source_success` (see "Confirmed gaps" below). **Correlators:** none in current platform state.
 
-**Expected ATT&CK:** T1552.001, T1567, T1078.004.
+**Expected ATT&CK on resulting incident:** none — no incident forms (blocked_observable_match Detections are recorded but no correlator promotes them, same as A2).
 
-**Reused:** all of A1's identity-side primitives + A2's blocked-observable seed.
+**Confirmed gaps (corrected from earlier draft — three distinct findings):**
+1. `process_suspicious_child` Linux gap (5th confirmation across A1-A5).
+2. `blocked_observable_match` → no correlator promotes Detection to Incident (2nd confirmation, A2 was first).
+3. **NEW for A5:** `anomalous_source_success` requires recent `auth.failed` events for the user (`backend/app/detection/rules/auth_anomalous_source_success.py:36-42` gates on `failure_count >= 1` from the Redis `corr:auth_failures:<user>` window). The stage-4 clean cloud login from a brand-new IP — exactly how cloud credential theft works in the real world (attacker has the keys, no need to guess) — does not fire. Phase 22 LotL plan should add an **identity-baseline detector** ("first time user has ever logged in from this source_ip") as a sibling to the existing failure-gated detector.
+
+**Reused:** all of A1's identity-side primitives + A2's blocked-observable seed (manifest setup directive).
 
 ### A6 — Files & Acceptance roll-up
 

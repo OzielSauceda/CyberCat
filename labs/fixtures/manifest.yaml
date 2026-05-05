@@ -118,3 +118,28 @@
 - fixture: scenario/ransomware_staging.jsonl
   must_fire: []
   must_not_fire: [py.process.suspicious_child, py.auth.failed_burst, py.auth.anomalous_source_success, py.blocked_observable_match]
+
+# --- Phase 20 §A5: cloud_token_theft_lite ---
+# Cloud credential theft — bash→cat AWS creds → bash→curl POST to exfil host
+# (198.51.100.88, pre-seeded into blocked_observables) → outbound network
+# connection → attacker uses stolen tokens cleanly from cloud-NAT-IP.
+#
+# Detector reality (current platform state — see docs/phase-20-plan.md §A5
+# scenario notes):
+#   * py.process.suspicious_child has no Linux bash→cat / bash→curl branch
+#     (5th confirmation of the recurring gap; A1+A2+A3+A4+A5).
+#   * py.blocked_observable_match fires twice — stage 2 (cmdline contains
+#     exfil IP) and stage 3 (dst_ip = exfil IP). Detector returns on first
+#     match per event so it's recorded as 2 separate Detection rows.
+#   * py.auth.anomalous_source_success does NOT fire on the stage-4 cloud
+#     login. Detector requires recent auth.failed events for the user
+#     (auth_anomalous_source_success.py:36-42 — gates on failure_count >= 1).
+#     Clean cred theft (no brute force precedent) slips past it. NEW
+#     Phase 22 input: identity-baseline detector ("first time user has
+#     ever logged in from this IP") would catch this attack pattern.
+- fixture: scenario/cloud_token_theft_lite.jsonl
+  setup:
+    block_observable:
+      - {value: "198.51.100.88", kind: "ip"}
+  must_fire: [py.blocked_observable_match]
+  must_not_fire: [py.process.suspicious_child, py.auth.failed_burst, py.auth.anomalous_source_success]
