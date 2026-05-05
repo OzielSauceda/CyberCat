@@ -1,0 +1,25 @@
+- id: linux_lateral_ssh
+  name: SSH lateral pivot (sshd → bash → ssh)
+  description: |
+    Models the canonical Linux lateral-movement chain: an interactive bash
+    shell (already inside the lab) spawns ssh and pivots to a peer host.
+    No password is provided — the connection fails fast at host resolution
+    or auth, but the *process tree* (sshd → bash → ssh) is what we want
+    to surface. Phase 21 expects no detection (Gap 1, A1 evidence). Phase
+    22 will add a process-chain detector keyed on (parent, child,
+    cmdline-fragment, time-window) triples.
+  tactic: lateral-movement
+  technique:
+    attack_id: T1021.004
+    name: SSH
+  platforms:
+    linux:
+      sh:
+        command: |
+          # Spawn the chain explicitly so the parent_image enrichment
+          # downstream (cct-agent → backend) sees sshd → bash → ssh.
+          /bin/bash -c 'ssh -o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=3 host-2.invalid id || true'
+        cleanup: |
+          # No persistent state to clean up — the failed ssh connection
+          # leaves nothing on disk. Recorded for completeness.
+          true

