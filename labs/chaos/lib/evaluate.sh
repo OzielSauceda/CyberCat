@@ -10,9 +10,10 @@
 #   3. event_count_5min     — count of rows in the events table from the last 5 minutes.
 #   4. degraded_warnings    — count of degraded-mode log lines (pattern is scenario-specific).
 #
-# These counters match the shape that .github/workflows/chaos-redis.yml uses
-# inline; once this helper lands, that workflow may optionally be tightened
-# to source it (Phase 19.5 §B3 — non-breaking polish, not required for done).
+# These counters match the shape that .github/workflows/chaos-redis.yml uses;
+# as of 2026-05-04 that workflow sources this helper, so CI and local A1
+# evaluation share the same code path (single source of truth for what
+# "graceful degradation" means in this project).
 #
 # All functions:
 #   - Print an integer to stdout (for capture via $(func ...)).

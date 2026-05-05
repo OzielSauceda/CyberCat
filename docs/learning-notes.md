@@ -91,6 +91,7 @@ Each entry follows the same shape:
 - [Smoke tests vs unit tests vs integration tests](#smoke-tests-vs-unit-tests-vs-integration-tests)
 - [p50 / p95 / p99 percentiles](#p50--p95--p99-percentiles)
 - [Load harness (rate, duration, transport errors)](#load-harness-rate-duration-transport-errors)
+- [Bash sourcing & shared shell libraries](#bash-sourcing--shared-shell-libraries)
 
 ---
 
@@ -3722,4 +3723,40 @@ The driver's job is to coordinate the chaos event (restart postgres at t=10s) wi
 
 ---
 
-*End of entries — first-pass coverage of Phases 1–19. New concepts will be appended as they come up in future sessions; existing entries will be updated in place if a topic gets revisited in greater depth.*
+### Bash sourcing & shared shell libraries
+*Introduced: Phase 19.5 (chaos infra) · Category: Verification*
+
+**Intuition:** `source path/to/lib.sh` is the Bash equivalent of an `import` statement — it pulls another file's functions and variables into the *current* shell so you can call them as if they were defined locally. The alias `. path/to/lib.sh` (a single dot) does exactly the same thing; the dot form is older and POSIX-portable, `source` is the bash-specific synonym.
+
+**Precise:** Running `bash file.sh` forks a *child* process and executes the script there — anything defined inside dies with the child. Sourcing (`source file.sh` or `. file.sh`) executes the file's lines in the *current* shell process, so function definitions, variable assignments, and `set` flags persist after the file finishes. This is how shell "libraries" work: a file that defines functions but doesn't run anything top-level, intended to be sourced rather than executed. The convention is to make such files non-executable (no shebang execution) and to guard top-level side effects with `[[ "${BASH_SOURCE[0]}" == "${0}" ]]` checks if you want the file to be both runnable and sourceable. `BASH_SOURCE` is an array containing the call stack of source files — `BASH_SOURCE[0]` is the file currently executing, which lets a sourced library figure out its own path even when the caller is in a different directory.
+
+**Why it exists:** Without sourcing, the only way to share Bash code is copy-paste. That works for two callers; it rots fast at five. CyberCat's chaos scenarios were the trigger — six scenario scripts (`labs/chaos/scenarios/kill_redis.sh`, `restart_postgres.sh`, etc.) plus a CI workflow (`.github/workflows/chaos-redis.yml`) all needed to compute the same four §A1 acceptance counters (sim tracebacks, backend tracebacks, event count in last 5 min, degraded-mode warning lines). Six copies of `grep -c "Traceback"` would drift the moment one scenario added a new degraded-mode log shape; one helper means changing the rule once.
+
+**The sourcing dance.** The canonical pattern when a script needs to find a sibling helper regardless of cwd:
+
+```bash
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source=../lib/evaluate.sh
+. "$SCRIPT_DIR/../lib/evaluate.sh"
+```
+
+Three things to notice. First, `BASH_SOURCE[0]` is preferred over `$0` because `$0` is the *invoking* script, not the file currently running — they differ when the script itself was sourced. Second, the `cd ... && pwd` resolves any `..` or symlinks in the path. Third, the `# shellcheck source=` comment isn't a no-op — it tells the `shellcheck` linter where to follow the source so it can verify the helper's function names exist. Without it, shellcheck warns "can't follow non-constant source."
+
+**Function scoping under `set -uo pipefail`.** A sourced helper inherits the caller's `set` flags. If the caller has `set -u` (error on unset variable) and `pipefail` (pipeline fails if any segment fails), the helper functions must be written defensively. Two specific gotchas hit `evaluate.sh`:
+
+1. `local count` matters. Without `local`, the helper would assign to a global, polluting the caller's namespace. With `local`, the variable is scoped to the function body and disappears on return.
+2. `grep -c` exits 1 when there are no matches but still prints `0`. Under `pipefail`, that exit-1 fires, and a naive `count=$(grep -c ... | tr ... || echo 0)` will produce `00` (the `0` from `grep -c` + the `0` from the fallback). The fix is to compute `count=$(... || true)` first, then `echo "${count:-0}"` once.
+
+Both patterns are visible in `count_traceback_lines` at `labs/chaos/lib/evaluate.sh:52`.
+
+**Where in CyberCat:** `labs/chaos/lib/evaluate.sh` defines five helpers — `count_traceback_lines`, `count_postgres_events_5min`, `count_degraded_warnings`, `capture_backend_log`, `print_acceptance_summary` — plus a `cleanup_chaos_state` trap helper. Sourced from six local scenario scripts (`labs/chaos/scenarios/*.sh`) and from `.github/workflows/chaos-redis.yml` as of 2026-05-04. Each scenario passes its own degraded-mode regex pattern to `count_degraded_warnings`, so the helper stays scenario-agnostic while the per-scenario rules live with the scenario.
+
+**Where else you'll see it:** Almost every nontrivial bash codebase has this. Examples: `git`'s test suite (`t/test-lib.sh` is sourced by hundreds of `t*.sh` scripts), Homebrew's formulae (sourced helpers in `Library/Homebrew/`), most production deploy scripts (`deploy_lib.sh` sourced by `deploy_staging.sh` + `deploy_prod.sh`), `oh-my-zsh` plugins (each plugin is a sourced script), and most `.bashrc` / `.zshrc` configs (sourced at shell startup). Outside Bash: Python's `import`, Node's `require`/`import`, Lua's `require`, Tcl's `source` — every scripting language has the same construct, often with the same name.
+
+**Tradeoffs:** Sourcing is implicit dependency injection — the helper functions appear in your namespace without an explicit declaration of *which* functions you're getting. Large libraries make this cognitively expensive (you can't tell at a glance which `count_*` came from where). The mitigation is keeping helper files small and topical (`evaluate.sh` is one purpose: chaos acceptance counters). The other tradeoff is shell-state pollution: a sourced file that runs `set -e` or modifies `IFS` at the top level changes the caller's shell behavior, often surprisingly. The convention is "library files only define things; they don't `set` flags or execute side effects."
+
+**Related entries:** [Smoke tests vs unit tests vs integration tests](#smoke-tests-vs-unit-tests-vs-integration-tests) · [Load harness (rate, duration, transport errors)](#load-harness-rate-duration-transport-errors)
+
+---
+
+*End of entries — first-pass coverage of Phases 1–19.5. New concepts will be appended as they come up in future sessions; existing entries will be updated in place if a topic gets revisited in greater depth.*

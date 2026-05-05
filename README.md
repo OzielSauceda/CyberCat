@@ -41,7 +41,11 @@ To run with Wazuh as an alternative telemetry source: `./start.sh --profile wazu
 
 ## Status
 
-Phase 19 (hardening + CI/CD + detection-as-code) ✅ shipped 2026-05-02 — tag `v0.9`. The CI badge tracks every push; the Smoke badge tracks the docker-compose chain run on `main` and nightly. Phase 19.5 (chaos testing) is next per the roadmap. See `PROJECT_STATE.md` for current phase status and the full verification scorecard.
+Phase 19.5 (chaos testing) ✅ closed 2026-05-04 — six fault-injection scenarios (kill Redis, restart Postgres, network-partition agent, SIGSTOP agent, OOM-kill backend, slow Postgres network) all green locally, plus a regression-injection sanity check that proves the harness catches resilience regressions in both directions. The `chaos-redis` GitHub Actions workflow gates the §A1 acceptance bar on Linux runners using shared evaluators from `labs/chaos/lib/evaluate.sh`.
+
+Phase 19 (hardening + CI/CD + detection-as-code) ✅ shipped 2026-05-02 — tag `v0.9`. The CI badge tracks every push; the Smoke badge tracks the docker-compose chain run on `main` and nightly.
+
+**Phase 20 (heavy-hitter choreographed scenarios — `lateral_movement_chain`, `crypto_mining_payload`, `webshell_drop`, `ransomware_staging`, `cloud_token_theft_lite`, plus operator drills + merge/split incidents)** is next per the roadmap. See `PROJECT_STATE.md` for the full phase-by-phase verification scorecard.
 
 ## License
 

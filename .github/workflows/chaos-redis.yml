@@ -25,6 +25,12 @@ name: Chaos — Redis Kill (Phase 19 §A1)
 # not a failure. Demanding --verify to pass during chaos conflates §A1's
 # graceful-degradation bar with the stricter "system runs perfectly through
 # any failure" bar that no realistic resilience model claims.
+#
+# Eval helpers: this workflow sources `labs/chaos/lib/evaluate.sh` so the
+# four §A1 counters (sim_tracebacks / backend_tracebacks / event_count_5min /
+# degraded_warnings) are computed by the same helper functions the local
+# A1–A6 scenario scripts use. Single source of truth for what "graceful
+# degradation" means in this project.
 
 on:
   workflow_dispatch:
@@ -113,6 +119,13 @@ jobs:
           set -x
           set -uo pipefail
 
+          # Source shared chaos eval helpers — same functions used by the
+          # local labs/chaos/scenarios/*.sh scripts. Sourcing (vs. running)
+          # injects the functions into THIS step's shell scope; they will not
+          # carry over to later workflow steps.
+          # shellcheck source=labs/chaos/lib/evaluate.sh
+          . labs/chaos/lib/evaluate.sh
+
           echo "CHECKPOINT 1: script entered  $(date -Is)"
 
           # Start simulator in background. --no-verify because the §A1 bar is
@@ -174,11 +187,12 @@ jobs:
 
           # Backend logs from the chaos window (always print, not just on failure)
           # so the §A1 acceptance evidence is visible in the green run too.
+          # capture_backend_log() writes to backend.log via the shared helper —
+          # same shape the local A1–A6 scripts use.
           echo "================================================================"
           echo "  backend logs (last 250 lines)"
           echo "================================================================"
-          docker compose -f infra/compose/docker-compose.yml --profile agent \
-            logs backend --tail 250 > backend.log 2>&1 || true
+          capture_backend_log backend.log 250
           cat backend.log || true
           echo "================================================================"
           echo "  end backend logs"
@@ -188,34 +202,29 @@ jobs:
           # Per docs/phase-19-plan.md line 67:
           #   "killing Redis ... does not raise; events land in Postgres;
           #    one degraded-mode warning log appears."
+          #
+          # The four counters below come from labs/chaos/lib/evaluate.sh —
+          # same helpers the local scenario scripts use, so CI and local A1
+          # report the same shape and apply the same pass/fail criteria.
 
           echo "CHECKPOINT 8: starting §A1 evaluation"
 
           # Criterion 1: no unhandled tracebacks (sim or backend).
-          SIM_TRACEBACKS=$(grep -c "Traceback (most recent call last)" sim.log || true)
-          BACKEND_TRACEBACKS=$(grep -c "Traceback (most recent call last)" backend.log || true)
+          SIM_TRACEBACKS=$(count_traceback_lines sim.log)
+          BACKEND_TRACEBACKS=$(count_traceback_lines backend.log)
 
-          # Criterion 2: events landed in Postgres during the chaos window.
-          # Count events ingested in the last 5 minutes.
-          EVENT_COUNT=$(docker compose -f infra/compose/docker-compose.yml --profile agent \
-            exec -T postgres psql -U cybercat -d cybercat -t -A \
-            -c "SELECT count(*) FROM events WHERE occurred_at > now() - interval '5 minutes';" \
-            2>/dev/null | tr -d ' \r\n' || echo "0")
-          : "${EVENT_COUNT:=0}"
+          # Criterion 2: events landed in Postgres during the chaos window
+          # (last 5 minutes; helper queries inside the postgres container).
+          EVENT_COUNT=$(count_postgres_events_5min)
 
           # Criterion 3: at least one degraded-mode warning fired (proves the
-          # resilience layer activated, not just lucky timing). Match a few
-          # likely log shapes: the explicit "redis_degraded" / "redis_state="
-          # / "degraded mode" patterns the detectors emit.
-          DEGRADED_LINES=$(grep -cE "redis_degraded|redis_state=unavailable|degraded mode|EventBus consumer crashed" backend.log || true)
+          # resilience layer activated, not just lucky timing). Pattern stays
+          # inline here — A1 has its own log shapes; helper takes the regex
+          # so each scenario can pass its own.
+          DEGRADED_LINES=$(count_degraded_warnings backend.log \
+            "redis_degraded|redis_state=unavailable|degraded mode|EventBus consumer crashed")
 
-          echo "================================================================"
-          echo "  §A1 acceptance evaluation"
-          echo "================================================================"
-          echo "  sim_tracebacks     = $SIM_TRACEBACKS  (must be 0)"
-          echo "  backend_tracebacks = $BACKEND_TRACEBACKS  (must be 0)"
-          echo "  event_count_5min   = $EVENT_COUNT  (must be > 0)"
-          echo "  degraded_warnings  = $DEGRADED_LINES  (must be > 0)"
+          print_acceptance_summary "$SIM_TRACEBACKS" "$BACKEND_TRACEBACKS" "$EVENT_COUNT" "$DEGRADED_LINES"
           echo "  simulator_exit     = $SIM_EXIT  (informational)"
           echo "================================================================"
 
