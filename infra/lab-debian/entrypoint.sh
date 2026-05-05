@@ -45,5 +45,29 @@ fi
 # Start Wazuh agent
 service wazuh-agent start 2>/dev/null || true
 
+# Phase 21: launch Sandcat (Caldera's Linux agent) when CALDERA_URL is set.
+# Mirrors the WAZUH_MANAGER conditional pattern above. Sandcat is fetched
+# at runtime from the Caldera server's /file/download endpoint with the
+# platform/architecture/group selected via headers. Wrapped in
+# ( ... & ) || true so that a missing/unreachable Caldera (the common case
+# when --profile caldera is OFF) does not abort sshd startup.
+if [ -n "$CALDERA_URL" ]; then
+    SANDCAT_GROUP="${CALDERA_GROUP:-red}"
+    if [ ! -x /opt/sandcat/sandcat ]; then
+        curl -sk -X POST \
+             -H "file:sandcat.go" \
+             -H "platform:linux" \
+             -H "gocat-version:5.0.0" \
+             -o /opt/sandcat/sandcat \
+             "${CALDERA_URL}/file/download" 2>/dev/null \
+            && chmod +x /opt/sandcat/sandcat
+    fi
+    if [ -x /opt/sandcat/sandcat ]; then
+        ( /opt/sandcat/sandcat -server "${CALDERA_URL}" \
+                               -group "${SANDCAT_GROUP}" \
+                               -v >> /var/log/sandcat.log 2>&1 & ) || true
+    fi
+fi
+
 # Run sshd in foreground as PID 1
 exec /usr/sbin/sshd -D

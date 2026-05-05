@@ -21,6 +21,13 @@ RUN curl -sO https://packages.wazuh.com/4.x/apt/pool/main/w/wazuh-agent/wazuh-ag
     && dpkg -i wazuh-agent_4.9.2-1_amd64.deb \
     && rm wazuh-agent_4.9.2-1_amd64.deb
 
+# Phase 21: prepare Sandcat (Caldera's Linux agent) work directory.
+# Binary is fetched at container start by entrypoint.sh from the Caldera
+# server when CALDERA_URL is set. Fetch-on-start matches Caldera's own
+# Linux enrollment docs and keeps this image decoupled from Caldera's
+# release cadence.
+RUN mkdir -p /opt/sandcat && chmod 755 /opt/sandcat
+
 # Seed lab users
 RUN useradd -m -s /bin/bash realuser \
     && echo "realuser:${REALUSER_PASSWORD}" | chpasswd \

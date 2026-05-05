@@ -171,6 +171,12 @@ services:
     environment:
       - WAZUH_MANAGER=wazuh-manager
       - WAZUH_REGISTRATION_PASSWORD=${WAZUH_REGISTRATION_PASSWORD:-}
+      # Phase 21: Sandcat (Caldera Linux agent) is fetched and started by
+      # entrypoint.sh only when CALDERA_URL is non-empty. Compose with
+      # --profile caldera sets these via .env; without that profile the
+      # vars are empty and Sandcat startup is skipped.
+      - CALDERA_URL=${CALDERA_URL:-}
+      - CALDERA_GROUP=${CALDERA_GROUP:-red}
     cap_add:
       - AUDIT_WRITE
       - AUDIT_CONTROL
@@ -231,6 +237,33 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # ── Tier D: Caldera adversary emulation (--profile caldera) ──────────────
+  # MITRE Caldera C2 server for ATT&CK-mapped adversary emulation against
+  # lab-debian. Default OFF; only runs with --profile caldera. See
+  # docs/decisions/ADR-0016-caldera-emulation.md.
+  #
+  # Bound to 127.0.0.1 only (CLAUDE.md §8 host-safety): the UI is reachable
+  # by the operator on the laptop and by no one else.
+  caldera:
+    build:
+      context: ../caldera
+      dockerfile: Dockerfile
+    profiles: [caldera]
+    hostname: caldera
+    environment:
+      CALDERA_API_KEY: ${CALDERA_API_KEY:-CYBERCAT_DEV_KEY_DO_NOT_SHIP}
+    ports:
+      - "127.0.0.1:8888:8888"
+    volumes:
+      - caldera_data:/usr/src/app/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8888/api/v2/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 60s
+    restart: unless-stopped
+
 volumes:
   postgres_data:
   wazuh_indexer_data:
@@ -238,3 +271,4 @@ volumes:
   wazuh_manager_logs:
   lab_logs:
   cct_agent_state:
+  caldera_data:

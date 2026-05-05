@@ -64,6 +64,13 @@ agent_profile_active() {
   return 1
 }
 
+caldera_profile_active() {
+  for p in "${PROFILES[@]}"; do
+    if [ "$p" = "caldera" ]; then return 0; fi
+  done
+  return 1
+}
+
 # ----------------------------------------------------------------------------
 # Docker Desktop bringup (Windows convenience)
 # ----------------------------------------------------------------------------
@@ -162,6 +169,37 @@ if agent_profile_active; then
     echo "✓ Token written to $ENV_FILE"
     echo "  Recreating cct-agent with the new token..."
     docker compose -f "$COMPOSE_FILE" "${PROFILE_FLAGS[@]}" up -d --force-recreate cct-agent
+  fi
+fi
+
+# ----------------------------------------------------------------------------
+# First-run Caldera API key bootstrap (only if --profile caldera is active)
+# ----------------------------------------------------------------------------
+if caldera_profile_active; then
+  current_key=""
+  if [ -f "$ENV_FILE" ]; then
+    current_key=$(grep "^CALDERA_API_KEY=" "$ENV_FILE" 2>/dev/null | head -1 | sed 's/^CALDERA_API_KEY=//' | tr -d '\r')
+  fi
+  if [ -z "$current_key" ] || [ "$current_key" = "CYBERCAT_DEV_KEY_DO_NOT_SHIP" ]; then
+    echo
+    echo "First-run: generating CALDERA_API_KEY..."
+    new_key=$(openssl rand -hex 16 2>/dev/null || head -c 32 /dev/urandom | base64 | head -c 32)
+    if [ ! -f "$ENV_FILE" ]; then
+      if [ -f "$ENV_EXAMPLE" ]; then
+        cp "$ENV_EXAMPLE" "$ENV_FILE"
+      else
+        : > "$ENV_FILE"
+      fi
+    fi
+    if grep -q "^CALDERA_API_KEY=" "$ENV_FILE" 2>/dev/null; then
+      sed -i.bak "s|^CALDERA_API_KEY=.*|CALDERA_API_KEY=$new_key|" "$ENV_FILE"
+      rm -f "${ENV_FILE}.bak"
+    else
+      echo "CALDERA_API_KEY=$new_key" >> "$ENV_FILE"
+    fi
+    echo "✓ CALDERA_API_KEY written to $ENV_FILE"
+    echo "  Recreating caldera with the new key..."
+    docker compose -f "$COMPOSE_FILE" "${PROFILE_FLAGS[@]}" up -d --force-recreate caldera
   fi
 fi
 
