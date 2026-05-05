@@ -100,6 +100,26 @@ def process_created(
     }
 
 
+def file_created(
+    host: str,
+    path: str,
+    user: str | None = None,
+    occurred_at: datetime | None = None,
+    dedupe_key: str | None = None,
+) -> dict:
+    normalized: dict = {"host": host, "path": path}
+    if user:
+        normalized["user"] = user
+    return {
+        "source": "seeder",
+        "kind": "file.created",
+        "occurred_at": _ts(occurred_at),
+        "raw": normalized.copy(),
+        "normalized": normalized,
+        "dedupe_key": dedupe_key,
+    }
+
+
 def network_connection(
     host: str,
     src_ip: str,

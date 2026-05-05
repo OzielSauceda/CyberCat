@@ -64,3 +64,22 @@
 - fixture: scenario/lateral_movement_chain.jsonl
   must_fire: [py.auth.failed_burst, py.auth.anomalous_source_success]
   must_not_fire: [py.process.suspicious_child, py.blocked_observable_match]
+
+# --- Phase 20 §A2: crypto_mining_payload ---
+# Linux cryptojacking — bash→curl xmrig → chmod → mining process → pool beacon.
+# Pool IP (198.51.100.77) is pre-seeded into blocked_observables so the network
+# beacon (and the cmdline reference at stage 4) trip blocked_observable_match.
+#
+# Detector reality (current platform state — see docs/phase-20-plan.md §A2
+# scenario notes):
+#   * py.process.suspicious_child has no Linux bash→curl|sh / bash→chmod branch
+#     (same gap as A1; backend/app/detection/rules/process_suspicious_child.py).
+#   * py.blocked_observable_match fires on stage 4 (cmdline contains pool IP)
+#     and stage 5 (dst_ip = pool IP). The detector returns on first match per
+#     event so there is one Detection per matching event.
+- fixture: scenario/crypto_mining_payload.jsonl
+  setup:
+    block_observable:
+      - {value: "198.51.100.77", kind: "ip"}
+  must_fire: [py.blocked_observable_match]
+  must_not_fire: [py.process.suspicious_child, py.auth.failed_burst, py.auth.anomalous_source_success]

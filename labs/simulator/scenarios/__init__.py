@@ -7,6 +7,7 @@ import types
 _REGISTRY: dict[str, str] = {
     "credential_theft_chain": "labs.simulator.scenarios.credential_theft_chain",
     "lateral_movement_chain": "labs.simulator.scenarios.lateral_movement_chain",
+    "crypto_mining_payload": "labs.simulator.scenarios.crypto_mining_payload",
 }
 
 
