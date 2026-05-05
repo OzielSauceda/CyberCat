@@ -37,11 +37,11 @@ Every scenario lives at `labs/simulator/scenarios/<name>.py`, follows the `crede
 7. `process.created` host-2 — sshd→bash→`ssh alice@host-3`.
 8. `auth.succeeded` — alice@host-3 from host-2.
 
-**Acceptance (must_fire):** `py.auth.failed_burst`, `py.auth.anomalous_source_success`, `py.process.suspicious_child`. **Correlators:** `identity_compromise` (alice), `identity_endpoint_chain` (cross-layer alice), `endpoint_compromise_join` (extends identity incident with host-2 evidence).
+**Acceptance (must_fire):** `py.auth.failed_burst`, `py.auth.anomalous_source_success`. **must_not_fire:** `py.process.suspicious_child` (see "Likely gap" below). **Correlators:** `identity_compromise` (alice). The `identity_endpoint_chain` and `endpoint_compromise_join` correlators are downstream-blocked by the missing endpoint signal — A1 produces a single `identity_compromise` incident in current platform state.
 
-**Expected ATT&CK on resulting incident:** T1110, T1078, T1021.004, T1059.004, T1105.
+**Expected ATT&CK on resulting incident:** T1110, T1078. (T1021.004, T1059.004, T1105 are present in the event evidence but won't be tag-attached because no detector matches them in current platform state — Phase 22 LotL input.)
 
-**Likely gap (record, do not fix):** `endpoint_compromise_join` keys on a single `(user, host)` pair within 30 min — the second hop (host-3) probably will not extend the incident automatically. Document in `docs/phase-20-summary.md`.
+**Likely gap (record, do not fix — corrected from earlier draft):** `process_suspicious_child` (`backend/app/detection/rules/process_suspicious_child.py:14-25`) has three branches — encoded PowerShell, Office→shell, rundll32+script — all Windows-flavored. There is **no** Linux `sshd→bash→ssh` branch. A1's stages 4–7 will not fire any endpoint detector, so the cross-layer chain (`identity_endpoint_chain`, `endpoint_compromise_join`) cannot form. This is a Phase 22 LotL detector candidate, not a Phase 20 fix. The earlier "second-hop won't extend" concern is moot — there's no incident to extend in the first place.
 
 **Reused from prior phases:** `SimulatorClient.post_event()` (Phase 8); `auth_failed`/`auth_succeeded`/`process_created` templates (Phase 8 — `labs/simulator/event_templates.py:16-126`); `extend_incident()` (`backend/app/correlation/extend.py:22-92`, Phase 11).
 

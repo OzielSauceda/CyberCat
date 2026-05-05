@@ -50,3 +50,17 @@
       - {value: "198.51.100.66", kind: "ip"}
   must_fire: [py.blocked_observable_match]
   must_not_fire: [py.auth.failed_burst, py.process.suspicious_child]
+
+# --- Phase 20 §A1: lateral_movement_chain ---
+# Linux brute-force → login → 2-hop SSH pivot (host-1 → host-2 → host-3) with
+# curl|sh persistence on host-2.
+#
+# Detector reality (current platform state — see docs/phase-20-plan.md §A1
+# "Likely gap"): py.process.suspicious_child has no Linux sshd→bash→ssh branch
+# (backend/app/detection/rules/process_suspicious_child.py:14-25 covers
+# encoded-PowerShell, Office→shell, rundll32+script only). The chain stages
+# are present in the fixture as evidence — they're the Phase 22 LotL detector
+# input — but no current detector matches them.
+- fixture: scenario/lateral_movement_chain.jsonl
+  must_fire: [py.auth.failed_burst, py.auth.anomalous_source_success]
+  must_not_fire: [py.process.suspicious_child, py.blocked_observable_match]
