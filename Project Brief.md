@@ -562,4 +562,10 @@ Authority for these decisions:
 
 Everything in the original brief above (defensive scope, Postgres-truth / Redis-ephemeral, custom application layer is the star, Wazuh as upstream telemetry, laptop-safe stack, no heavyweight infra) is unchanged. The case-file frontend identity is additive — it gives the product a face, it does not redirect the platform.
 
+---
+
+## Phase 20 postscript (2026-05-05, tag `v1.0`)
+
+Phase 20 added five named choreographed scenarios (`lateral_movement_chain`, `crypto_mining_payload`, `webshell_drop`, `ransomware_staging`, `cloud_token_theft_lite`), CLI-driven operator drills, and the merge/split incidents affordance. The platform now **trains analysts** as well as detects — drills walk an operator through real triage at decision points and verify their responses against the API; merge/split lets analysts fold duplicate investigations together or lift evidence into a separate one (every commercial SOC platform has this). The hand-curated detection-gap list in `docs/phase-20-summary.md` (4 evidenced detector candidates: Linux process-chain LotL, blocked-observable correlator promotion, identity-baseline for clean cred theft, file-creation rate burst) is the input list for Phase 21 (Caldera) and Phase 22 (LotL behavior-chain detection). The "no new detectors" guardrail held throughout — Phase 20's job was measurement before guess. ADR-0015 captures the merge/split design (nullable parent FK + `'merged'` enum value + IncidentTransition audit log; splits don't set parent FK; downgrade is asymmetric for Postgres enum reasons).
+
  
