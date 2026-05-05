@@ -4,11 +4,38 @@ Living status document. Update as reality changes. Short, current, honest.
 
 ---
 
-## ⏯ Phase 20 — ✅ FULLY SHIPPED 2026-05-05 (v1.0)
+## ⏯ Pick up next session
 
-**Branch state:** `phase-20-heavy-hitter-scenarios`, 10 commits ahead of `main`. Ready to merge to `main` and tag `v1.0`.
+**Where `main` is:** `11778e3` on `origin/main`. `v1.0` tag pushed. CI + Smoke both green. Working tree carries only `randomPrompt.md` (pre-existing, not part of this session).
 
-**Today's headline:** Phase 20 done top-to-bottom in one session. Five Linux choreographed scenarios + operator drills + merge/split incidents (schema migration + correlator + API + frontend modal/button + ADR-0015) + smoke + docs + the gap-list deliverable. Verification scorecard 10/10 green: 257/257 backend tests, 15/15 detection-as-code, 9/9 phase-20 smoke, frontend typecheck clean, image rebuilt + serving.
+**Status: Phase 20 fully closed and shipped to `origin/main`.** Nothing pending on the Phase 20 work itself.
+
+**Next up: Phase 21 — Caldera adversary emulation + coverage scorecard.** Inputs are ready:
+- The hand-curated detection-gap list lives in `docs/phase-20-summary.md` "Detection gaps" section (4 evidenced detector candidates).
+- The 2026-04-30 memory entry `project_phase22_23_thesis` captures the post-Phase-21 plan ("intent over tool name").
+- Phase 21 will run Caldera (new container in the compose stack) against `lab-debian` (existing Linux lab) and produce a systematic scorecard. Expected first-run coverage: ~10-25% (the brutal-looking number IS the deliverable; it becomes Phase 22's punch list).
+
+**Day-1 startup commands (when ready to start Phase 21):**
+```bash
+bash start.sh                                       # bring stack up
+git checkout -b phase-21-caldera-emulation          # branch off origin/main = 11778e3
+# then ask Claude to draft docs/phase-21-plan.md
+```
+
+**Operational reminders that bit us today (don't repeat):**
+- **Run `ruff check app/` against backend changes before pushing.** The backend dev image doesn't ship ruff; CI installs it via `[dev]` extras. The Phase 20 merge took one CI-red iteration because pytest was green locally but lint wasn't checked. Codified in `feedback_run_ruff_before_push.md` memory entry. Quickest path: `MSYS_NO_PATHCONV=1 docker run --rm -v "/c/Users/oziel/OneDrive/Desktop/CyberCat/backend:/work" -w /work python:3.12-slim bash -c "pip install ruff --quiet && ruff check app/"`.
+- **Backend image is baked, not bind-mounted** (same pattern as the long-known frontend gotcha). Any change to `backend/app/`, `backend/tests/`, or `backend/alembic/versions/` requires `docker compose -f infra/compose/docker-compose.yml build backend && docker compose -f infra/compose/docker-compose.yml up -d backend` before the change is visible inside the container.
+
+**Optional follow-ups deferred (not blocking Phase 21):**
+- Browser-verify merge/split UI manually (smoke probes confirmed routes wire through; UI components built per dossier-token aesthetic but no human click-through yet).
+- Migrate the remaining `bg-zinc-*` references in `frontend/app/components/StatusPill.tsx` and `ProposeActionModal.tsx` to dossier tokens — out of scope for Phase 20, picked up Phase 24+ or whenever a frontend-cleanup pass happens.
+- Add `POST /v1/admin/blocked-observables` admin endpoint (operator-tooling backlog item — would unblock cleaner A2 live demos and operator drills).
+
+---
+
+## Phase 20 close-out (2026-05-05, v1.0 pushed)
+
+**Today's headline:** Phase 20 done top-to-bottom in one session — pushed to `origin/main`, `v1.0` tagged. Five Linux choreographed scenarios + operator drills + merge/split incidents (schema migration + correlator + API + frontend modal/button + ADR-0015) + smoke + docs + the gap-list deliverable. After-merge verification: 257/257 backend tests, 15/15 detection-as-code, 9/9 phase-20 smoke, frontend typecheck clean, image rebuilt + serving. **One CI-red iteration after push** — ruff caught 4 lint issues in the new merge/split code (2× B904 missing `from exc`, 2× F401 unused imports); fixed in `11778e3`, CI re-ran green. Lesson saved to memory: run ruff locally before pushing backend changes.
 
 **The substantive deliverable beyond product surface:** `docs/phase-20-summary.md` "Detection gaps" section is the **Phase 21 + Phase 22 input list**. Four evidenced detector candidates, each with named scenario(s) as evidence and named code paths to modify:
 1. **Linux process-chain detection (LotL)** — A1+A2+A3+A4+A5 all hit it; `process_suspicious_child.py:14-25` is Windows-only; Phase 22 builds a *new* detector module (not an extension), per ADR-0015's "intent over tool name" thesis.
@@ -29,11 +56,15 @@ Plus one operator-tooling finding (Phase 24+ candidate): no admin API for seedin
 - B drills orchestrator + 5 markdown drills (commit `2378bc2`)
 - C backend (schema 0009 + merge.py + split.py + 2 routes + 36/36 tests + ADR-0015) (commit `ba786bc`)
 - C frontend (MergeModal + SplitButton + viz checkboxes, dossier-token aesthetic via frontend-design skill) (commit `f417a9a`)
-- D smoke + docs + this header (next commit) → `v1.0` tag
+- D smoke + docs + summary (commit `36d9ffc`)
+- merge `--no-ff` into `main` (commit `9692191`) + `v1.0` tag
+- post-push lint fix (commit `11778e3`) — see "ruff" note above
 
-**Bug found + fixed during Workstream C:** `resolve_actor_id()` is async and takes `db` as second arg; the new merge/split routes initially called it without `await db` — typo caught by the integration tests.
+**Bugs found + fixed during the build:**
+1. `resolve_actor_id()` is async and takes `db` as second arg; the new merge/split routes initially called it without `await db` — caught by the integration tests during Workstream C.
+2. Ruff `B904` + `F401` in the new merge/split code — caught by CI after the v1.0 push, fixed in `11778e3` (3 lines changed). Memory entry codified to run ruff locally going forward.
 
-**Next:** merge `phase-20-heavy-hitter-scenarios` to `main`, tag `v1.0`. Then Phase 21 (Caldera adversary emulation + coverage scorecard) — the gap list above is its input. Plan to be drafted when ready to start.
+**Phase 20 status:** ✅ FULLY SHIPPED to `origin/main` with `v1.0`. Next phase = Phase 21 (Caldera adversary emulation + coverage scorecard) — the gap list above is its input. Plan to be drafted when ready to start.
 
 ---
 
