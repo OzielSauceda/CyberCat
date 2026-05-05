@@ -96,6 +96,11 @@ export const INCIDENT_STATUS_LABELS: Record<IncidentStatus, Label> = {
     plain: "New signals have arrived — the case was reopened.",
     slug: "status",
   },
+  merged: {
+    label: "Merged",
+    plain: "This incident was folded into another. Evidence and entities live on the parent now.",
+    slug: "status",
+  },
 }
 
 export const INCIDENT_KIND_LABELS: Record<IncidentKind, Label> = {

@@ -50,9 +50,16 @@ interface PlacedEvent {
 export function IncidentTimelineViz({
   events,
   detections,
+  splitMode = false,
+  selectedEventIds,
+  onToggleSplitEvent,
 }: {
   events: TimelineEvent[]
   detections: DetectionRef[]
+  // Phase 20 §C — split-mode props (optional; viz works fine without them)
+  splitMode?: boolean
+  selectedEventIds?: Set<string>
+  onToggleSplitEvent?: (eventId: string) => void
 }) {
   const reducedMotion = useReducedMotion() ?? false
   // Bumping this remounts the animated layer to replay the sweep on demand.
@@ -303,6 +310,9 @@ export function IncidentTimelineViz({
                   reducedMotion={reducedMotion}
                   hovered={hoveredId === p.event.id}
                   onHover={(id) => setHoveredId(id)}
+                  splitMode={splitMode}
+                  selected={selectedEventIds?.has(p.event.id) ?? false}
+                  onToggleSplit={onToggleSplitEvent}
                 />
               )
             })}
@@ -383,6 +393,9 @@ interface EventChipProps {
   reducedMotion: boolean
   hovered: boolean
   onHover: (id: string | null) => void
+  splitMode?: boolean
+  selected?: boolean
+  onToggleSplit?: (eventId: string) => void
 }
 
 function EventChip({
@@ -393,6 +406,9 @@ function EventChip({
   reducedMotion,
   hovered,
   onHover,
+  splitMode = false,
+  selected = false,
+  onToggleSplit,
 }: EventChipProps) {
   const { event: ev, isTrigger, detection } = placed
   const role = ev.role_in_incident
@@ -471,7 +487,7 @@ function EventChip({
 
       {/* The dot itself */}
       <span className="relative block">
-        {isTrigger && !reducedMotion && (
+        {isTrigger && !reducedMotion && !splitMode && (
           <motion.span
             className="absolute inset-0 rounded-full"
             style={{
@@ -505,6 +521,37 @@ function EventChip({
             outlineOffset: 2,
           }}
         />
+        {/* Phase 20 §C — split-mode checkbox overlay; takes priority over the
+            dot's own click target so the operator can freely toggle without
+            triggering hover-only behaviors. */}
+        {splitMode && onToggleSplit && (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onToggleSplit(ev.id) }}
+            aria-pressed={selected}
+            aria-label={selected ? "Unselect event for split" : "Select event for split"}
+            className={`absolute -inset-1.5 z-20 rounded-full border-2 transition-all ${
+              selected
+                ? "border-cyber-orange bg-cyber-orange/30 shadow-[0_0_14px_rgba(255,107,53,0.55)]"
+                : "border-dossier-evidenceTape/55 bg-dossier-stamp/70 hover:border-dossier-evidenceTape hover:shadow-[0_0_12px_rgba(0,212,255,0.35)]"
+            }`}
+          >
+            {selected && (
+              <svg
+                className="absolute inset-0 m-auto h-3 w-3 text-cyber-orange"
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="3"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden
+              >
+                <path d="M3 8l3.5 3.5L13 5" />
+              </svg>
+            )}
+          </button>
+        )}
       </span>
 
       {/* Hover tooltip — full detail, single source of truth */}

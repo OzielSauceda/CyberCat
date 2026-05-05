@@ -11,6 +11,7 @@ export const ALLOWED_TRANSITIONS: Record<IncidentStatus, IncidentStatus[]> = {
   resolved:     ["closed", "investigating"],
   closed:       [],
   reopened:     ["investigating"],
+  merged:       [],  // Phase 20 §C — terminal state; no transitions out
 }
 
 export const REASON_REQUIRED = new Set<IncidentStatus>(["contained", "resolved", "closed"])
