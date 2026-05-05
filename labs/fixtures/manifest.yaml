@@ -100,3 +100,21 @@
 - fixture: scenario/webshell_drop.jsonl
   must_fire: []
   must_not_fire: [py.process.suspicious_child, py.auth.failed_burst, py.auth.anomalous_source_success, py.blocked_observable_match]
+
+# --- Phase 20 §A4: ransomware_staging ---
+# Linux ransomware-staging — find docs → tar archive → 30-file .encrypted
+# burst (synthetic; no real files written, per CLAUDE.md §8) → rm originals.
+#
+# Detector reality (current platform state — see docs/phase-20-plan.md §A4):
+#   * py.process.suspicious_child has no Linux bash→find/tar/rm branch
+#     (same gap as A1+A2+A3).
+#   * No file-creation-burst detector exists. The 30-file burst over a 60s
+#     window is the canonical signal a Phase 22 detector would catch.
+#   * No auth events; no pre-blocked observables.
+#
+# Outcome: every detector silent. The choreography exists to demonstrate
+# the burst pattern; the manifest's must_not_fire encodes the gap as a
+# regression contract until Phase 22 lands the burst detector.
+- fixture: scenario/ransomware_staging.jsonl
+  must_fire: []
+  must_not_fire: [py.process.suspicious_child, py.auth.failed_burst, py.auth.anomalous_source_success, py.blocked_observable_match]

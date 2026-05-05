@@ -9,6 +9,7 @@ _REGISTRY: dict[str, str] = {
     "lateral_movement_chain": "labs.simulator.scenarios.lateral_movement_chain",
     "crypto_mining_payload": "labs.simulator.scenarios.crypto_mining_payload",
     "webshell_drop": "labs.simulator.scenarios.webshell_drop",
+    "ransomware_staging": "labs.simulator.scenarios.ransomware_staging",
 }
 
 
