@@ -708,6 +708,80 @@ The orchestrator at `labs/chaos/run_chaos.sh` runs the scenarios in roadmap orde
 
 Both substitutions are documented in `docs/phase-19.5-plan.md` § "Calibration vs the roadmap".
 
+## Running Phase 20 scenarios
+
+Five named, repeatable Linux attack stories live under
+`labs/simulator/scenarios/`. Run any of them against the live stack:
+
+```bash
+TOKEN=$(grep '^CCT_AGENT_TOKEN=' infra/compose/.env | cut -d= -f2- | tr -d '\r')
+docker compose -f infra/compose/docker-compose.yml exec -T backend \
+    python -m labs.simulator --scenario lateral_movement_chain --speed 0.1 \
+    --api http://localhost:8000 --token "$TOKEN"
+```
+
+Available scenarios: `lateral_movement_chain`, `crypto_mining_payload`,
+`webshell_drop`, `ransomware_staging`, `cloud_token_theft_lite`. The
+`--speed 0.1` flag compresses real-time pacing into ~2-17s per run.
+
+In current platform state, only `lateral_movement_chain` produces an
+incident (`identity_compromise` for alice). The other four are
+"gap-review" scenarios that exercise choreography but produce no
+incident — their detection gaps are recorded in
+`docs/phase-20-summary.md` as Phase 22 LotL-detector inputs.
+
+## Operator drills (Workstream B)
+
+CLI-driven walk-throughs that wrap a scenario with decision-point
+prompts. Run any drill:
+
+```bash
+bash labs/drills/run.sh lateral_movement_chain --speed 0.1
+# or skip the "Press Enter" pauses for smoke-style runs:
+bash labs/drills/run.sh ransomware_staging --speed 0.1 --no-pause
+```
+
+The orchestrator polls `GET /v1/incidents` for the expected incident
+kind, prints the URL, and after each pause queries the API to verify
+your response (status transition, action proposal). Each scenario has
+a markdown drill at `labs/drills/<scenario>.md` with briefing,
+decision points, and "what this teaches" — re-read them after the
+session for spaced reinforcement.
+
+## Merging and splitting incidents
+
+Two analyst-only routes (added Phase 20 §C). Both gated by
+`require_analyst`; viewer-tier accounts get 403.
+
+```bash
+TOKEN=$(grep '^CCT_AGENT_TOKEN=' infra/compose/.env | cut -d= -f2- | tr -d '\r')
+SOURCE=<source-incident-uuid>
+TARGET=<target-incident-uuid>
+
+# Merge SOURCE into TARGET — source becomes status='merged' with
+# parent_incident_id=TARGET. All evidence (events, entities, detections,
+# ATT&CK tags) absorbed into TARGET.
+curl -X POST "http://localhost:8000/v1/incidents/$SOURCE/merge-into" \
+    -H "Authorization: Bearer $TOKEN" \
+    -H "Content-Type: application/json" \
+    -d "{\"target_id\": \"$TARGET\", \"reason\": \"duplicate of target\"}"
+
+# Split: lift selected events off SOURCE into a brand-new child incident.
+curl -X POST "http://localhost:8000/v1/incidents/$SOURCE/split" \
+    -H "Authorization: Bearer $TOKEN" \
+    -H "Content-Type: application/json" \
+    -d '{"event_ids": ["<uuid1>", "<uuid2>"], "entity_ids": [], "reason": "different investigation"}'
+```
+
+Error mapping: 422 (self-merge, empty selection, events-not-on-source),
+404 (missing source/target), 409 (closed/merged target, already-merged
+source). See `docs/decisions/ADR-0015-incident-merge-split.md` for the
+durable design notes.
+
+In the UI, both flows live on the incident detail page: "Merge into…"
+and "Split…" buttons in the header. Split mode renders a checkbox per
+event row in the timeline.
+
 ## Regenerate the OpenAPI snapshot
 
 The backend writes `openapi.json` inside the container. Copy it to the host so the frontend codegen can read it:

@@ -13,6 +13,8 @@ const styles: Record<IncidentStatus | ActionStatus, string> = {
   resolved:      "text-emerald-300 bg-emerald-950 border-emerald-700",
   closed:        "text-zinc-500 bg-zinc-900 border-zinc-700",
   reopened:      "text-purple-300 bg-purple-950 border-purple-700",
+  // Phase 20 §C — merged source. Cyber-orange to match merge action color.
+  merged:        "text-cyber-orange bg-cyber-orange/10 border-cyber-orange/40",
   // action statuses
   proposed:      "text-blue-300 bg-blue-950 border-blue-700",
   executed:      "text-emerald-300 bg-emerald-950 border-emerald-700",
@@ -30,6 +32,7 @@ const INCIDENT_STATUSES = new Set([
   "resolved",
   "closed",
   "reopened",
+  "merged",
 ])
 
 function lookup(status: IncidentStatus | ActionStatus): { label: string; plain: string } {

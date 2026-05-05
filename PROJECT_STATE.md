@@ -4,30 +4,36 @@ Living status document. Update as reality changes. Short, current, honest.
 
 ---
 
-## ⏯ Pick up tomorrow (2026-05-05)
+## ⏯ Phase 20 — ✅ FULLY SHIPPED 2026-05-05 (v1.0)
 
-**Where main is:** `86966f0` on `origin/main`. Everything from today is pushed. Working tree clean (only `randomPrompt.md` shows as modified, pre-existing).
+**Branch state:** `phase-20-heavy-hitter-scenarios`, 10 commits ahead of `main`. Ready to merge to `main` and tag `v1.0`.
 
-**Today's two big things:**
-1. **Phase 19.5 closed** — all 6 chaos scenarios green locally + regression-injection sanity check passed both directions (broke `safe_redis`, harness FAILed correctly with `degraded_warnings=0`).
-2. **End-to-end health check pre-Phase-20** — 236 backend tests + 103 agent tests + 7 smoke flows + API surface (36 endpoints) all green. One real bug surfaced and fixed: `labs/smoke_test_phase13.sh` had hardcoded `2026-01-01` timestamps that Phase 19's input validation rejects (>30 days past). Replaced with now-relative `date -u -d "N minutes ago"`. Commit `86966f0`.
+**Today's headline:** Phase 20 done top-to-bottom in one session. Five Linux choreographed scenarios + operator drills + merge/split incidents (schema migration + correlator + API + frontend modal/button + ADR-0015) + smoke + docs + the gap-list deliverable. Verification scorecard 10/10 green: 257/257 backend tests, 15/15 detection-as-code, 9/9 phase-20 smoke, frontend typecheck clean, image rebuilt + serving.
 
-**Next phase: Phase 20 — heavy-hitter choreographed scenarios.** Five named scenarios: `lateral_movement_chain`, `crypto_mining_payload`, `webshell_drop`, `ransomware_staging`, `cloud_token_theft_lite`. Plus operator drills + merge/split incidents. Adds product surface (unlike 19/19.5 which were verification phases).
+**The substantive deliverable beyond product surface:** `docs/phase-20-summary.md` "Detection gaps" section is the **Phase 21 + Phase 22 input list**. Four evidenced detector candidates, each with named scenario(s) as evidence and named code paths to modify:
+1. **Linux process-chain detection (LotL)** — A1+A2+A3+A4+A5 all hit it; `process_suspicious_child.py:14-25` is Windows-only; Phase 22 builds a *new* detector module (not an extension), per ADR-0015's "intent over tool name" thesis.
+2. **No correlator promotes `blocked_observable_match` → Incident** — A2 + A5; `endpoint_compromise_standalone.py:38` keys on `py.process.*` rule_ids only.
+3. **No identity-baseline detector for clean cred theft (no brute force)** — A5 alone; `auth_anomalous_source_success.py:36-42` requires recent failures, so clean stolen-creds login slips past.
+4. **No file-creation rate burst detector** — A4 alone; volumetric category, distinct from process-chain and identity-baseline.
 
-**Recommended workflow for Phase 20: feature branch + PR.** Following the Phase 17/18/19 pattern, not the 19.5 direct-push pattern. Suggested branch: `phase-20-heavy-hitter-scenarios`. Why: multi-day effort, multi-commit, you'd want CI gating *before* main, you'd want a single PR description as the chapter heading, and a clean rollback unit if a scenario goes sideways.
+Plus one operator-tooling finding (Phase 24+ candidate): no admin API for seeding blocked observables; would unblock cleaner A2 live demos.
 
-**Day-1 startup commands:**
-```bash
-bash start.sh                        # bring stack up
-git checkout -b phase-20-heavy-hitter-scenarios   # branch off origin/main = 86966f0
-# then ask Claude to draft docs/phase-20-plan.md as the §9 before-pass
-```
+**Plan corrections shipped:** the original `docs/phase-20-plan.md` had over-optimistic `must_fire` claims for §A1, §A3, §A5 (assumed `process_suspicious_child` was "calibrated for sshd→bash chains" when in fact it has zero Linux branches). Corrected in the plan file as part of each scenario's commit.
 
-**Operational reminders that bit us today (don't repeat):**
-- After chaos work that wedges the EventBus, `docker compose --profile agent restart backend` clears it. Curl can hang on `/healthz` even when `docker ps` shows "Up."
-- Phase 13 smoke test truncates the DB; Phase 17 expects fresh seed state. Run them in isolation with state resets between, not chained.
+**Workstream timeline (one session):**
+- A1 lateral_movement_chain (commit `24530af`) → produces real `identity_compromise` incident
+- A2 crypto_mining_payload (commit `dd12b1f`) → no incident in current platform state, blocked_observable_match correlator gap surfaced
+- A3 webshell_drop (commit `d9699c7`) → apache2→sh chain gap
+- A4 ransomware_staging (commit `fe85483`) → file-creation burst gap surfaced
+- A5 cloud_token_theft_lite (commit `9130564`) → clean-cred-theft identity-baseline gap surfaced
+- B drills orchestrator + 5 markdown drills (commit `2378bc2`)
+- C backend (schema 0009 + merge.py + split.py + 2 routes + 36/36 tests + ADR-0015) (commit `ba786bc`)
+- C frontend (MergeModal + SplitButton + viz checkboxes, dossier-token aesthetic via frontend-design skill) (commit `f417a9a`)
+- D smoke + docs + this header (next commit) → `v1.0` tag
 
-**Optional deferred items (not blocking Phase 20):** trigger the 5 non-redis `chaos-*.yml` workflows from GitHub Actions tab for cross-platform Linux confirmation; tag `v0.95` or roll into Phase 20's `v1.0`; refactor `chaos-redis.yml` to source `lib/evaluate.sh` if you want A1 verified on Linux too (~30-45 min).
+**Bug found + fixed during Workstream C:** `resolve_actor_id()` is async and takes `db` as second arg; the new merge/split routes initially called it without `await db` — typo caught by the integration tests.
+
+**Next:** merge `phase-20-heavy-hitter-scenarios` to `main`, tag `v1.0`. Then Phase 21 (Caldera adversary emulation + coverage scorecard) — the gap list above is its input. Plan to be drafted when ready to start.
 
 ---
 

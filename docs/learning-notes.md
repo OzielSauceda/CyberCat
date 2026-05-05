@@ -3759,4 +3759,136 @@ Both patterns are visible in `count_traceback_lines` at `labs/chaos/lib/evaluate
 
 ---
 
-*End of entries — first-pass coverage of Phases 1–19.5. New concepts will be appended as they come up in future sessions; existing entries will be updated in place if a topic gets revisited in greater depth.*
+## Choreographed attack scenario
+*Introduced: Phase 20* · *Category: Project Pattern*
+
+**Intuition:** A scripted "fake attacker" — a Python `async` function that calls `SimulatorClient.post_event()` repeatedly with timed `await asyncio.sleep()` between events, simulating the real-time pacing of an attack. The script *posts* fake events to the API; it never executes real malicious commands. Phase 8's `credential_theft_chain.py` was the original; Phase 20 added five more.
+
+**Precise:** A scenario module under `labs/simulator/scenarios/` exporting `SCENARIO_NAME`, an `async run(client: SimulatorClient, speed: float = 1.0) -> dict` entry point, and an optional `async verify(client: SimulatorClient) -> bool`. The `--speed` flag from `python -m labs.simulator` is a multiplier on real-time offsets — `--speed 0.1` compresses a 5-min real-time scenario into ~30s. Each `run()` returns a dict of event IDs and incident IDs touched for downstream assertion.
+
+**Why it exists:** Without scripted scenarios, every test of the platform's correlation behavior requires hand-curling 8-15 events with carefully-timed delays and matching dedupe keys. Scenarios package the choreography so anyone can re-run any attack story by name. They also pair with the detection-as-code regression suite (each scenario ships a `.jsonl` fixture under `labs/fixtures/scenario/` that the pytest manifest replays).
+
+**Where in CyberCat:** `labs/simulator/scenarios/credential_theft_chain.py` (Phase 8 prototype), `labs/simulator/scenarios/lateral_movement_chain.py` and four siblings (Phase 20). Registered in `labs/simulator/scenarios/__init__.py:7-12`.
+
+**Where else you'll see it:** MITRE Caldera "operations" are a heavier version (live agent execution, not just event posting). Atomic Red Team's `.yaml` invocations are a similar idea at the host-execution level. SafeBreach and Cymulate are commercial BAS (breach-and-attack-simulation) platforms built around the same primitive.
+
+**Tradeoffs:** Scenarios are *event simulations*, not *real attack execution*. They can't surface execution-level bugs (e.g., "does the platform correctly parse what auditd actually emits when bash runs curl"). They're great for testing the post-ingest pipeline (normalization, detection, correlation, incident formation) but have to be paired with real telemetry tests for end-to-end coverage.
+
+**Related entries:** Detection-as-code regression · Pre-Phase-22 measurement vs guess
+
+---
+
+## Living off the Land (LotL) detection
+*Introduced: Phase 20 (preview); Phase 22 (build)* · *Category: Security*
+
+**Intuition:** "The attacker uses tools that are already on the system" — `curl`, `bash`, `ssh`, `chmod`, `tar`. Every individual binary is legitimate. The malicious thing is the *sequence*, not any single command. Detecting LotL is the opposite philosophy from antivirus (which looks for known-bad binary signatures) — you're looking at how legitimate tools are *used together*.
+
+**Precise:** LotL ("Living off the Land") is an attacker technique where the adversary avoids importing custom malware and instead chains together already-installed system utilities. Defensive detection requires *behavior-chain analysis*: track sequences like `download (curl/wget) → arm (chmod +x) → execute (./payload)` or `enumerate (find/cat) → archive (tar) → exfiltrate (curl POST)`. Stateless per-event detectors (which match a single event's binary name) are blind to LotL because every individual binary is on the allow-list.
+
+**Why it exists as a category:** Modern attackers prefer LotL because:
+1. No malware to detonate → AV/EDR signature databases miss it.
+2. The tools they use are also used by every admin → high background "noise" makes anomaly thresholds hard to set.
+3. It's portable across Linux distros (the same `bash → curl → chmod` chain works on Debian, RHEL, Alpine).
+
+CyberCat's `process_suspicious_child` detector (Phase 8) is the **opposite** approach: it has a hardcoded allow-list of suspicious *binary names* (PowerShell, Office, rundll32). That works for Windows because Windows attackers often use distinctive tools. It does NOT work for Linux because Linux attackers use `bash` and `curl` — which you can't allow-list without 100% false-positive rate. Phase 22 adds a *separate* detector specifically for LotL chains, leaving `process_suspicious_child` as-is for its Windows job.
+
+**Where in CyberCat:** Will live at `backend/app/detection/rules/process_lotl_chain.py` (Phase 22, name TBD). Phase 20 surfaced 5 named scenarios that would feed it (A1-A5 in `docs/phase-20-summary.md`).
+
+**Where else you'll see it:** MITRE ATT&CK has LOLBAS (Living Off the Land Binaries and Scripts) as an entire technique catalog (T1059, T1218). Crowdstrike, SentinelOne, and Sysdig all have proprietary LotL detection engines. The `Sigma` rule format has many "lolbas" rules.
+
+**Tradeoffs:** LotL detection requires *stateful* per-session tracking (Redis windows per `(host, user, parent_pid)` triple), which is more expensive than stateless detection. False-positive tuning is harder — admin scripts that happen to match a chain look identical to attacker chains until you add operator-defined safe-list overrides.
+
+**Related entries:** Choreographed attack scenario · Detection-as-code regression
+
+---
+
+## Postgres advisory locks
+*Introduced: Phase 20* · *Category: Database*
+
+**Intuition:** A named mutex you can grab from any Postgres session, used to serialize work that touches multiple rows or external state. (A "mutex" is a "mutual exclusion" primitive — only one holder at a time.) Unlike `SELECT FOR UPDATE` which locks specific rows, an advisory lock locks an *abstract name* (any int8 you choose) so multiple operations that need to be sequential can coordinate without holding row locks the whole time.
+
+**Precise:** Postgres provides `pg_advisory_lock(int8)` and its variants. Two flavors matter:
+- `pg_advisory_lock(k)` — session-level. Lock is held until `pg_advisory_unlock(k)` or session ends. Used for cross-transaction coordination.
+- `pg_advisory_xact_lock(k)` — transaction-level. Lock is held until `COMMIT` or `ROLLBACK`. Released automatically. **This is the safer choice** for most use cases — no chance of forgetting to unlock.
+
+CyberCat's `merge_incidents()` uses `pg_advisory_xact_lock` keyed on a deterministic hash of `(min(src,tgt), max(src,tgt))`. Why: a merge involves *two* incident rows. If two operators click "merge A → B" and "merge B → A" simultaneously, `SELECT FOR UPDATE` alone could deadlock (each session locks one row in different orders). The advisory lock keyed on the canonicalized pair forces both transactions to serialize on the same key — the second one blocks until the first commits.
+
+**Why it exists:** Row locks (`SELECT FOR UPDATE`) work for single-row mutations but get tricky when you need multiple rows or external state (e.g., "send a webhook AND update the DB atomically — only one process at a time"). Advisory locks let you coordinate around an abstract identifier.
+
+**Where in CyberCat:** `backend/app/correlation/merge.py:65-68` (the `_advisory_lock_key` helper + the `pg_advisory_xact_lock` call); `backend/app/correlation/split.py` uses the same pattern keyed on a single incident ID.
+
+**Where else you'll see it:** Job queues built on Postgres (e.g., `pg-boss`, `graphile-worker`) use advisory locks to ensure only one worker picks up a given job. Schema migration tools like Alembic and Flyway use them to prevent two migration runs from racing.
+
+**Tradeoffs:** Advisory locks are *advisory* — Postgres doesn't enforce them, your code has to. If one piece of code grabs the lock and another piece of code mutates the same data without grabbing the lock, you have a race. Also: the int8 key space is shared globally; collisions between unrelated subsystems are possible if you don't namespace your keys.
+
+**Related entries:** Postgres enum mutability · Incident merge / split semantics
+
+---
+
+## Postgres enum mutability
+*Introduced: Phase 20* · *Category: Database*
+
+**Intuition:** Adding a value to a Postgres enum is easy (`ALTER TYPE ... ADD VALUE`). *Removing* a value is hard — Postgres doesn't have a clean `DROP VALUE`, so once you ship an enum value to production you basically own it forever. This shapes how you design schemas around enums.
+
+**Precise:** `ALTER TYPE my_enum ADD VALUE IF NOT EXISTS 'new_val'` works since Postgres 9.6 and is fully transactional since 12. But there is no `ALTER TYPE my_enum DROP VALUE 'old_val'` even in Postgres 17. The workaround is a full type rebuild: `CREATE TYPE my_enum_v2 AS ENUM (...)`, `ALTER COLUMN ... TYPE my_enum_v2 USING (column::text::my_enum_v2)`, `DROP TYPE my_enum`. This requires writing every dependent column simultaneously and only works if no row references the value being removed.
+
+CyberCat's `incident_status` enum got a `'merged'` value in migration 0009 (Phase 20). The `upgrade()` is symmetric (`ALTER TYPE ... ADD VALUE IF NOT EXISTS 'merged'`). The `downgrade()` is intentionally **asymmetric**: it drops the FK + column added in the same migration but does NOT remove `'merged'` from the enum. Documented in the migration docstring + ADR-0015. Operationally, we only ever downgrade fresh DBs in CyberCat, so the asymmetry is acceptable.
+
+**Why it exists:** Enums are stored as 4-byte integers internally with a separate name table. Removing a name would orphan rows that reference its integer ID. Postgres prefers correctness over convenience here.
+
+**Where in CyberCat:** `backend/alembic/versions/0009_incident_merge_split.py` — see the `upgrade()` / `downgrade()` pair and the docstring.
+
+**Where else you'll see it:** Every Postgres project that uses native enums hits this eventually. The conventional workaround is "use a check-constrained text column instead of an enum" — easier to mutate, slightly more disk. Some teams blanket-ban Postgres enums for this reason.
+
+**Tradeoffs:** Native enums give you compile-time-ish safety (the column rejects unknown values) and slightly smaller storage. Text-with-check-constraint trades that for operational flexibility. The choice depends on how often you expect the enum domain to change.
+
+**Related entries:** Postgres advisory locks · Incident merge / split semantics
+
+---
+
+## Incident merge / split semantics
+*Introduced: Phase 20* · *Category: Project Pattern*
+
+**Intuition:** Two analyst affordances most SOC platforms have: **merge** ("these two incidents are the same investigation, fold them together") and **split** ("this evidence belongs to a different incident, lift it off"). They look symmetric but actually have different semantics under the hood — merge is a fold operation (source disappears), split is a fork operation (new child created, source continues to exist).
+
+**Precise:** Merge: `merge_incidents(source_id, target_id, reason, actor)` bulk-moves all events/entities/detections/ATT&CK tags from source → target with `ON CONFLICT DO NOTHING`. Source becomes `status='merged'` and `parent_incident_id=target.id`. Target's severity becomes `max(src, tgt)`, confidence becomes `avg(src, tgt)`. Two `IncidentTransition` rows record the operation. SSE bus publishes `incident.merged` for both IDs. Concurrency safety: Postgres advisory lock keyed on `(min, max)` of the incident pair.
+
+Split: `split_incident(source_id, event_ids, entity_ids, reason, actor)` *moves* (not copies) the requested events and entities from source → a brand-new child incident. Source aggregates get recomputed against remaining detections. Two `IncidentTransition` rows. SSE publishes `incident.split`. **Critically**, split children do NOT set `parent_incident_id` — that field unambiguously means "this incident was merged into the referenced one." The audit link for splits is the IncidentTransition row.
+
+**Why it exists:** Without merge, the platform's correlators sometimes produce multiple incidents that an analyst recognizes as the *same* investigation. Triage fragments. Without split, evidence that belongs to a separate investigation gets stuck on the wrong incident, polluting its scope.
+
+**Where in CyberCat:** `backend/app/correlation/merge.py`, `backend/app/correlation/split.py`. API routes at `backend/app/api/routers/incidents.py` (`POST /v1/incidents/{id}/merge-into` and `/split`). Frontend at `frontend/app/incidents/[id]/MergeModal.tsx` and `SplitButton.tsx`. Schema in migration 0009. Design rationale in `docs/decisions/ADR-0015-incident-merge-split.md`.
+
+**Where else you'll see it:** Every commercial SOC platform (Splunk SOAR, Palo Alto XSOAR, IBM QRadar) has merge/split. Bug trackers like Linear and Jira use the same primitive ("mark as duplicate" = merge; "convert to subtask" = split-ish). Git's `cherry-pick + reset` is conceptually similar to split.
+
+**Tradeoffs:** Merge is one-way in current implementation — there's no "unmerge" UI. The data model supports reversal (clear `parent_incident_id`, change status off `merged`) but no UX, by design. Confidence on the source post-split stays as-is rather than being recomputed (recomputing requires a confidence-reduction formula that's not well-defined when detections have heterogeneous confidence hints). Cross-kind merges absorb without re-kinding (target keeps its `kind`, regardless of source's `kind`).
+
+**Related entries:** Postgres advisory locks · Postgres enum mutability · Choreographed attack scenario
+
+---
+
+## Pre-Phase-22 measurement vs guess
+*Introduced: Phase 20* · *Category: Project Pattern*
+
+**Intuition:** Before adding new detectors, *measure what you already catch*. Otherwise you're guessing what to add and will probably build the wrong thing. Phase 20's "no new detectors" guardrail exists so Phase 21 (Caldera) can give us a clean coverage baseline before Phase 22 starts writing LotL detectors.
+
+**Precise:** Three sequential phases with a deliberate input/output contract:
+- **Phase 20 (now-shipped):** Hand-craft 5 attack scenarios, run them, observe what fires. Record gaps. Output: hand-curated gap list (~5-8 named patterns).
+- **Phase 21 (next):** Run MITRE Caldera against the lab. Caldera fires ~50-100 ATT&CK techniques automatically and produces a coverage scorecard. Output: systematic gap list (likely ~30+ patterns), *which is the union of (a) what Phase 20 found and (b) techniques Phase 20 didn't think to test*.
+- **Phase 22:** Build new detectors targeting the combined gap list from 21. Re-run Caldera afterward to verify coverage went up.
+
+The crucial property: **Phase 20 must not add detectors**. If it did, Phase 21's coverage scorecard would be polluted by speculative additions, and we'd have no idea whether each detector closed a real gap or just one we made up.
+
+**Why it exists:** Most projects skip Phase 20+21 and jump straight to "add LotL detectors." The result is a long list of detectors that mostly catch things attackers don't actually do, and miss things they do. The measurement-first approach is more disciplined but takes ~2 phases longer.
+
+**Where in CyberCat:** Codified in `docs/phase-20-plan.md` line 9 ("No new detectors"). Recurring "Likely gap (record, do not fix)" pattern in plan §A1, §A3, §A4, §A5. Final gap list in `docs/phase-20-summary.md`.
+
+**Where else you'll see it:** Red-team / purple-team engagements use the same logic — run a known attack catalog (Atomic Red Team, MITRE Caldera) before commissioning custom detection content. SOC consultancies sell "detection coverage assessments" as their first engagement, before any "build new rules" engagement.
+
+**Tradeoffs:** The discipline costs time — 2 phases of "measurement" before anything looks like a detection improvement. The product surface from Phase 20 (drills, merge/split) helps justify the investment. Without those wins, "two phases of measurement" is a hard sell.
+
+**Related entries:** Living off the Land (LotL) detection · Choreographed attack scenario
+
+---
+
+*End of entries — coverage of Phases 1–20. New concepts will be appended as they come up in future sessions; existing entries will be updated in place if a topic gets revisited in greater depth.*

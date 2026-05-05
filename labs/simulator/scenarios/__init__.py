@@ -6,6 +6,11 @@ import types
 
 _REGISTRY: dict[str, str] = {
     "credential_theft_chain": "labs.simulator.scenarios.credential_theft_chain",
+    "lateral_movement_chain": "labs.simulator.scenarios.lateral_movement_chain",
+    "crypto_mining_payload": "labs.simulator.scenarios.crypto_mining_payload",
+    "webshell_drop": "labs.simulator.scenarios.webshell_drop",
+    "ransomware_staging": "labs.simulator.scenarios.ransomware_staging",
+    "cloud_token_theft_lite": "labs.simulator.scenarios.cloud_token_theft_lite",
 }
 
 

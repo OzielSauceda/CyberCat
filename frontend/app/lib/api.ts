@@ -18,6 +18,7 @@ export type IncidentStatus =
   | "resolved"
   | "closed"
   | "reopened"
+  | "merged"  // Phase 20 §C — source absorbed into another incident
 export type IncidentKind =
   | "identity_compromise"
   | "endpoint_compromise"
@@ -158,6 +159,7 @@ export interface IncidentDetail {
   closed_at: string | null
   correlator_rule: string
   correlator_version: string
+  parent_incident_id: string | null  // Phase 20 §C — set for merged sources
   entities: EntityRef[]
   detections: DetectionRef[]
   timeline: TimelineEvent[]
@@ -324,6 +326,39 @@ export function createTransition(id: string, body: TransitionIn): Promise<Transi
 
 export function createNote(id: string, body: NoteIn): Promise<NoteRef> {
   return request<NoteRef>(`/v1/incidents/${id}/notes`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+}
+
+// --- Phase 20 §C — merge & split ---
+
+export interface MergeIncidentIn {
+  target_id: string
+  reason: string
+}
+
+export interface SplitIncidentIn {
+  event_ids: string[]
+  entity_ids: string[]
+  reason: string
+}
+
+export function mergeIncidentInto(
+  sourceId: string,
+  body: MergeIncidentIn,
+): Promise<IncidentDetail> {
+  return request<IncidentDetail>(`/v1/incidents/${sourceId}/merge-into`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+}
+
+export function splitIncident(
+  sourceId: string,
+  body: SplitIncidentIn,
+): Promise<IncidentDetail> {
+  return request<IncidentDetail>(`/v1/incidents/${sourceId}/split`, {
     method: "POST",
     body: JSON.stringify(body),
   })

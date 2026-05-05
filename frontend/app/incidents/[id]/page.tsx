@@ -40,9 +40,11 @@ import { ActionsPanel } from "./ActionsPanel"
 import { AttackKillChainPanel } from "./AttackKillChainPanel"
 import { EntityGraphPanel } from "./EntityGraphPanel"
 import { IncidentTimelineViz } from "./IncidentTimelineViz"
+import { MergeModal } from "./MergeModal"
 import { NotesPanel } from "./NotesPanel"
 import { ProposeActionModal } from "./ProposeActionModal"
 import { RecommendedActionsPanel } from "./RecommendedActionsPanel"
+import { SplitButton } from "./SplitButton"
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -396,6 +398,18 @@ export default function IncidentDetailPage({ params }: { params: Promise<{ id: s
   const [activeTab, setActiveTab] = useState<Tab>("overview")
   const [proposeOpen, setProposeOpen] = useState(false)
   const [prefill, setPrefill] = useState<{ kind: ActionKind; form: Record<string, string> } | undefined>(undefined)
+  // Phase 20 §C — merge / split state
+  const [mergeOpen, setMergeOpen] = useState(false)
+  const [splitMode, setSplitMode] = useState(false)
+  const [selectedSplitEventIds, setSelectedSplitEventIds] = useState<Set<string>>(new Set())
+  const toggleSplitEvent = useCallback((eventId: string) => {
+    setSelectedSplitEventIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(eventId)) next.delete(eventId)
+      else next.add(eventId)
+      return next
+    })
+  }, [])
 
   const openPropose = useCallback(
     (p?: { kind: ActionKind; form: Record<string, string> }) => { setPrefill(p); setProposeOpen(true) },
@@ -472,6 +486,26 @@ export default function IncidentDetailPage({ params }: { params: Promise<{ id: s
                   <JargonTerm slug="confidence">confidence</JargonTerm>
                   <ConfidenceBar value={incident.confidence} />
                 </span>
+                {/* Phase 20 §C — merge + split actions (hidden when source already merged/closed) */}
+                {incident.status !== "merged" && incident.status !== "closed" && (
+                  <div className="ml-auto flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setMergeOpen(true)}
+                      className="rounded border border-dossier-paperEdge bg-dossier-stamp px-3 py-1.5 font-case text-[10px] font-semibold uppercase tracking-widest text-dossier-ink/55 transition-all hover:border-cyber-orange/40 hover:text-cyber-orange"
+                      title="Fold this incident into another"
+                    >
+                      Merge into…
+                    </button>
+                    <SplitButton
+                      incident={incident}
+                      splitMode={splitMode}
+                      selectedEventIds={selectedSplitEventIds}
+                      onToggleSplitMode={() => setSplitMode((v) => !v)}
+                      onClearSelection={() => setSelectedSplitEventIds(new Set())}
+                    />
+                  </div>
+                )}
               </div>
             </div>
             <div className="flex flex-wrap gap-5 border-t border-dossier-paperEdge bg-dossier-stamp/60 px-5 py-2.5 font-mono text-[10px] text-dossier-ink/30">
@@ -483,6 +517,42 @@ export default function IncidentDetailPage({ params }: { params: Promise<{ id: s
               </span>
             </div>
           </div>
+
+          {/* Phase 20 §C — merge/split provenance banners */}
+          {incident.parent_incident_id && (
+            <div className="flex items-center gap-3 rounded-xl border border-cyber-orange/30 bg-cyber-orange/5 px-5 py-3">
+              <span
+                className="select-none border-2 border-cyber-orange/50 px-2 py-0.5 font-case text-[9px] font-semibold uppercase tracking-widest text-cyber-orange"
+                style={{ transform: "rotate(-2deg)" }}
+              >
+                Merged
+              </span>
+              <p className="text-xs text-dossier-ink/70">
+                This incident was folded into{" "}
+                <Link
+                  href={`/incidents/${incident.parent_incident_id}`}
+                  className="font-mono text-dossier-evidenceTape underline underline-offset-2 transition-colors hover:text-cyber-orange"
+                >
+                  INC-{incident.parent_incident_id.slice(-8).toUpperCase()}
+                </Link>
+                . Evidence and entities live on the parent now.
+              </p>
+            </div>
+          )}
+          {incident.correlator_rule === "split" && (
+            <div className="flex items-center gap-3 rounded-xl border border-dossier-evidenceTape/30 bg-dossier-evidenceTape/5 px-5 py-3">
+              <span
+                className="select-none border-2 border-dossier-evidenceTape/50 px-2 py-0.5 font-case text-[9px] font-semibold uppercase tracking-widest text-dossier-evidenceTape"
+                style={{ transform: "rotate(-2deg)" }}
+              >
+                Split-off
+              </span>
+              <p className="text-xs text-dossier-ink/70">
+                This incident was created by splitting evidence off another incident. See the{" "}
+                <span className="font-case uppercase tracking-widest">history</span> tab for the audit row.
+              </p>
+            </div>
+          )}
 
           {/* ── Summary card — always visible ── */}
           <div className="rounded-xl border border-dossier-evidenceTape/20 bg-dossier-paper p-5"
@@ -527,7 +597,13 @@ export default function IncidentDetailPage({ params }: { params: Promise<{ id: s
                   <div data-tour="kill-chain-panel">
                     <AttackKillChainPanel attack={incident.attack} />
                   </div>
-                  <IncidentTimelineViz events={incident.timeline} detections={incident.detections} />
+                  <IncidentTimelineViz
+                    events={incident.timeline}
+                    detections={incident.detections}
+                    splitMode={splitMode}
+                    selectedEventIds={selectedSplitEventIds}
+                    onToggleSplitEvent={toggleSplitEvent}
+                  />
                   <EntityGraphPanel entities={incident.entities} events={incident.timeline} />
                   {incident.entities.length > 0 && (
                     <Panel title="Key Entities" count={incident.entities.length}>
@@ -590,6 +666,14 @@ export default function IncidentDetailPage({ params }: { params: Promise<{ id: s
         onProposed={() => { setProposeOpen(false); refetch() }}
         prefill={prefill}
       />
+
+      {incident && (
+        <MergeModal
+          open={mergeOpen}
+          source={{ id: incident.id, title: incident.title, kind: incident.kind }}
+          onClose={() => setMergeOpen(false)}
+        />
+      )}
     </div>
   )
 }
