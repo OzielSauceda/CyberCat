@@ -6,15 +6,26 @@ Living status document. Update as reality changes. Short, current, honest.
 
 ## ⏯ Pick up next session
 
-**Where `main` is:** `11778e3` on `origin/main`. `v1.0` tag pushed.
-**Working branch:** `phase-21-caldera-emulation` — five commits ahead of `main`, NOT yet pushed, NOT yet merged. Caldera has not yet been brought up; the first scorecard run is the operator's pickup task.
+> **Session paused 2026-05-05 mid-Phase-21.** Code is shipped locally; the *deliverable itself* (the first scorecard run) is the pickup task. Nothing is pushed, nothing is merged, nothing is running. Stack is down. `main` is untouched. The working tree is clean except for the pre-existing `randomPrompt.md` modification (carried in from before the session). It is safe to walk away for any length of time and resume from this header.
 
-**Status: Phase 21 code shipped, first run pending.** All five workstream commits landed locally on `phase-21-caldera-emulation`:
-- `phase-21 A` — Caldera service + Sandcat in lab-debian (compose `--profile caldera`, fetch-on-start)
-- `phase-21 B1` — 25-ability adversary profile + expectations registry + 5 custom abilities
-- `phase-21 B2` — `run.sh` + `scorer.py` + `build_operation_request.py` (six-status enum, set-overlap attribution rule, scorer logic verified against synthetic inputs)
-- `phase-21 D1` — `smoke_test_phase21.sh` (5 assertions)
-- `phase-21 D2` — ADR-0016 + `phase-21-summary.md` + runbook section + 4 learning-notes entries + this header rewrite
+**Where `main` is:** `11778e3` on `origin/main`. `v1.0` tag pushed.
+**Working branch:** `phase-21-caldera-emulation` — six commits ahead of `main`, NOT yet pushed, NOT yet merged. Caldera has not yet been brought up; the first scorecard run is the operator's pickup task.
+
+**Status: Phase 21 code shipped, first run pending.** Six commits landed locally on `phase-21-caldera-emulation`:
+- `phase-21 A` (`73b388c`) — Caldera service + Sandcat in lab-debian (compose `--profile caldera`, fetch-on-start)
+- `phase-21 B1` (`97c6dfb`) — 25-ability adversary profile + expectations registry + 5 custom abilities
+- `phase-21 B2` (`a7207e0`) — `run.sh` + `scorer.py` + `build_operation_request.py` (six-status enum, set-overlap attribution rule, scorer logic verified against synthetic inputs)
+- `phase-21 D1` (`018c8e4`) — `smoke_test_phase21.sh` (5 assertions)
+- `phase-21 D2` (`1fdca29`) — ADR-0016 + `phase-21-summary.md` + runbook section + 4 learning-notes entries + this header rewrite
+- `phase-21 D3` (`1c5d43d`) — single ruff F541 fix in `build_operation_request.py:301` (caught locally per `feedback_run_ruff_before_push` memory; ruff on `backend/app/` and `labs/caldera/` both green)
+
+**What was already verified autonomously (no Docker required):**
+- `ruff check backend/app/` and `ruff check labs/caldera/` both clean.
+- `python -c "import ast; ast.parse(...)"` on all three new Python files.
+- `bash -n` on `run.sh`, `smoke_test_phase21.sh`, the modified `entrypoint.sh` and `start.sh`.
+- Scorer logic unit-checked against five synthetic cases — all six status enum values map correctly (covered, gap, false-negative, unexpected-hit, ability-failed, ability-skipped). One bug found and fixed during testing: the asymmetric T1059 ↔ T1059.001 attribution case.
+
+**What is still pending — REQUIRES the operator's machine** (Docker Desktop running + a one-time 5-15 minute Caldera build):
 
 **Pickup task (the deliverable itself — first scorecard run):**
 
@@ -24,8 +35,8 @@ git checkout phase-21-caldera-emulation
 
 # 1. Bring up CyberCat with both --profile agent and --profile caldera.
 #    First run: start.sh provisions CALDERA_API_KEY automatically and
-#    recreates the caldera service. ~2-5 min for the first build of
-#    infra/caldera/Dockerfile (clones Caldera 5.0.0 source + pip install).
+#    recreates the caldera service. 5-15 min on first bring-up because
+#    infra/caldera/Dockerfile clones Caldera 5.0.0 source + pip-installs.
 bash start.sh --profile agent --profile caldera
 
 # 2. Allow Caldera ~60s start_period. Then verify health + Sandcat.
@@ -48,17 +59,13 @@ less docs/phase-21-scorecard.md
 # 6. Smoke green to confirm the loop is intact end-to-end.
 bash labs/smoke_test_phase21.sh
 
-# 7. Backend lint (Phase 20 CI-red lesson).
-MSYS_NO_PATHCONV=1 docker run --rm \
-    -v "/c/Users/oziel/OneDrive/Desktop/CyberCat/backend:/work" \
-    -w /work python:3.12-slim \
-    bash -c "pip install ruff --quiet && ruff check app/"
-
-# 8. Backend pytest still green (no schema changes — should be a no-op).
+# 7. Backend pytest still green (no schema changes — should be a no-op).
 docker compose -f infra/compose/docker-compose.yml exec backend pytest -q
 ```
 
-**After the first run:** paste the scorecard headline numbers + any newly-evidenced gap candidates into `docs/phase-21-summary.md` (the file ships with `_TBD_` placeholders awaiting that data). Then commit as `phase-21 D3: first-run scorecard + Phase 22 punch list ordering`. **Then PAUSE for operator confirmation before merging into main / tagging v1.1 / pushing.**
+(Step 7 from the original plan — `ruff check app/` — was already run and is green; D3 commit caught the only finding.)
+
+**After the first run:** paste the scorecard headline numbers + any newly-evidenced gap candidates into `docs/phase-21-summary.md` (the file ships with `_TBD_` placeholders awaiting that data). Then commit as `phase-21 D4: first-run scorecard + Phase 22 punch list ordering`. **Then PAUSE for operator confirmation before merging into main / tagging v1.1 / pushing.**
 
 **Risks / things that may bite during the first run** (full list in `docs/phase-21-plan.md` §"Risks / open questions"):
 1. Caldera 5.0.0 build may pull a deprecated dep — fall back to 4.2.0 in `infra/caldera/Dockerfile` ARG if so.

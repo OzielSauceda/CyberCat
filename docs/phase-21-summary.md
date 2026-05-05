@@ -1,7 +1,7 @@
 # Phase 21 — Caldera adversary emulation + coverage scorecard
 
-**Status:** Code complete; first scorecard run pending.
-**Branch:** `phase-21-caldera-emulation`
+**Status:** Code complete on branch (six commits, all local). First scorecard run pending — that run IS the deliverable. See `PROJECT_STATE.md` "Pick up next session" for the pickup commands.
+**Branch:** `phase-21-caldera-emulation` (NOT pushed, NOT merged into `main`)
 **Predecessor:** Phase 20 (commit `11778e3`, `v1.0`)
 **Successor:** Phase 22 (LotL behavior-chain detection — see `project_phase22_23_thesis` memory)
 
@@ -9,7 +9,7 @@
 
 ## What shipped (code)
 
-Five commits on the `phase-21-caldera-emulation` branch:
+Six commits on the `phase-21-caldera-emulation` branch:
 
 1. **`phase-21 A: caldera service + sandcat in lab-debian`** — Caldera
    5.0.0 as a `--profile caldera`-gated compose service (default OFF,
@@ -35,6 +35,11 @@ Five commits on the `phase-21-caldera-emulation` branch:
 5. **`phase-21 D2: ADR-0016 + docs + summary`** — this file plus
    ADR-0016, runbook section, four learning-notes entries, and the
    PROJECT_STATE pickup-rewrite.
+6. **`phase-21 D3: ruff F541`** — single lint finding in
+   `build_operation_request.py:301` (extraneous `f` prefix on a string
+   with no placeholders). Caught locally per
+   `feedback_run_ruff_before_push` memory — Phase 20's CI-red lesson
+   doing its job.
 
 ADR-0016 captures the seven decisions: Caldera as engine, profile-gate
 + 127.0.0.1 bind, `--insecure` acceptable in our deployment shape,
