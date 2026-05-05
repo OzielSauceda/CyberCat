@@ -61,6 +61,8 @@ Each entry follows the same shape:
 - [Sigma rule format](#sigma-rule-format)
 - [MITRE ATT&CK (tactics, techniques, subtechniques)](#mitre-attck-tactics-techniques-subtechniques)
 - [Detection-as-Code (DaC)](#detection-as-code-dac)
+- [MITRE Caldera adversary emulation](#mitre-caldera-adversary-emulation)
+- [ATT&CK technique attribution (set-overlap rule)](#attck-technique-attribution-set-overlap-rule)
 
 ### Database (Postgres)
 - [ON CONFLICT DO UPDATE / DO NOTHING (upserts and idempotent inserts)](#on-conflict-do-update--do-nothing-upserts-and-idempotent-inserts)
@@ -86,12 +88,14 @@ Each entry follows the same shape:
 - [Explainability contract](#explainability-contract)
 - [Plain-language summary layer](#plain-language-summary-layer)
 - [Recommendation engine (two-level mapping)](#recommendation-engine-two-level-mapping)
+- [Fetch-on-start agent enrollment](#fetch-on-start-agent-enrollment)
 
 ### Verification
 - [Smoke tests vs unit tests vs integration tests](#smoke-tests-vs-unit-tests-vs-integration-tests)
 - [p50 / p95 / p99 percentiles](#p50--p95--p99-percentiles)
 - [Load harness (rate, duration, transport errors)](#load-harness-rate-duration-transport-errors)
 - [Bash sourcing & shared shell libraries](#bash-sourcing--shared-shell-libraries)
+- [Coverage scorecard methodology](#coverage-scorecard-methodology)
 
 ---
 
@@ -3891,4 +3895,132 @@ The crucial property: **Phase 20 must not add detectors**. If it did, Phase 21's
 
 ---
 
-*End of entries — coverage of Phases 1–20. New concepts will be appended as they come up in future sessions; existing entries will be updated in place if a topic gets revisited in greater depth.*
+## MITRE Caldera adversary emulation
+*Introduced: Phase 21* · *Category: Detection*
+
+**Intuition:** Caldera is "Selenium for attackers" — a server that drives a small program (Sandcat) on your target machine through a scripted list of MITRE-ATT&CK-tagged commands and reports what worked. You point it at your own infrastructure to *measure* whether your detection stack notices each step.
+
+**Precise:** MITRE Caldera is an open-source adversary-emulation framework. The architecture is two pieces: a **C2 server** (the brain — a Python web app exposing a UI and REST API on port 8888) and **agents** like Sandcat (the body — small Go binaries that beacon to the C2, pull instructions, run them, return results). Operators define **adversary profiles** as ordered lists of **abilities**, where each ability is a YAML doc containing `(executor, platform, command, ATT&CK technique)`. Caldera ships ~80–150 Linux abilities in a curated bundle called **Stockpile**. An **operation** is a single execution of a profile against an agent group; the operation's **report** is the per-step record (which abilities ran, what they returned, when).
+
+**How it works (under the hood):**
+
+The **agent enrollment** flow: a fresh Sandcat binary starts with `-server <CALDERA_URL> -group <name>`. It POSTs to `/beacon` with its hostname, OS, paw (a unique ID), and the group name; Caldera registers it and returns instructions for the next pulse. Sandcat then polls every N seconds (default ~3 sec). The pulse loop is HTTP long-polling with a small payload — no persistent socket required.
+
+The **operation lifecycle**:
+1. POST `/api/v2/adversaries` with the ordered ability list → adversary is registered, returns `adversary_id`.
+2. POST `/api/v2/operations` with `{adversary_id, planner_id, agent_group}` → server creates an operation, state moves to `running`.
+3. The selected **planner** (e.g., `atomic` — sequential, deterministic) decides which ability to dispatch next. On each agent's beacon, the planner returns the next ability's command.
+4. Sandcat runs the command, captures stdout/stderr/exit code, returns it on the next pulse. Caldera records this as a **step** with status (0 = success).
+5. When the planner has no more abilities to dispatch, the operation moves to state `finished`.
+6. GET `/api/v2/operations/{id}/report` returns the full per-agent step list — that's what our scorer reads.
+
+The **planner** abstraction matters because not all profiles are sequential. Caldera ships planners like `batch` (run everything in parallel), `look` (look for facts before running). For coverage scoring we use `atomic` so the order of execution matches `atomic_ordering` exactly — which makes per-ability attribution to time windows unambiguous.
+
+**Why it exists:** Hand-crafted attack scenarios (the Phase 20 simulator approach) are author-biased — you only test what you thought to test. Caldera flips this: the ability list is community-curated (MITRE + contributors), and running it gives you a *measured* coverage signal. The whole industry calls this "purple teaming" — defenders running known-attacker behavior to assess their own coverage.
+
+**Where in CyberCat:** Caldera 5.0.0 runs in `infra/caldera/` (Dockerfile pinned to upstream tag, `local.yml` with our plugin set). Compose service in `infra/compose/docker-compose.yml` (profile `caldera`, default OFF, bound to 127.0.0.1:8888 only). Sandcat fetched on start by `infra/lab-debian/entrypoint.sh` when `CALDERA_URL` is set. Adversary profile + abilities live in `labs/caldera/`. Decision rationale in `docs/decisions/ADR-0016-caldera-emulation.md`.
+
+**Where else you'll see it:** MITRE's own [`mitre/caldera`](https://github.com/mitre/caldera) repo. Atomic Red Team is a related project (similar ability YAMLs but no agent — runs from a control machine via SSH/WinRM). Commercial purple-team tools like AttackIQ, Mandiant Security Validation, and SafeBreach use the same primitive (ATT&CK-tagged abilities, agent-driven execution, coverage reporting). Most modern SOC consultancies run a Caldera-based "coverage assessment" before any rule-authoring engagement.
+
+**Tradeoffs:** Caldera's ability quality varies — some Stockpile entries assume tools that aren't installed, some run the wrong command for the technique they claim. Curating a subset (Phase 21 chose ~25 abilities) costs author time but makes the scorecard interpretable. Caldera's UI is feature-rich but `--insecure` mode is acceptable only on a private bind; deploying in a multi-user environment requires generating cert material and configuring auth properly. Stockpile UUIDs rotate across major releases — pin the version and re-resolve on bumps.
+
+**Related entries:** [MITRE ATT&CK (tactics, techniques, subtechniques)](#mitre-attck-tactics-techniques-subtechniques) · [Coverage scorecard methodology](#coverage-scorecard-methodology) · [ATT&CK technique attribution (set-overlap rule)](#attck-technique-attribution-set-overlap-rule) · [Fetch-on-start agent enrollment](#fetch-on-start-agent-enrollment)
+
+---
+
+## ATT&CK technique attribution (set-overlap rule)
+*Introduced: Phase 21* · *Category: Detection*
+
+**Intuition:** When you have an attacker action tagged "T1059" (parent) and a defender alert tagged "T1059.004" (subtechnique), are they the same thing? The answer is "close enough to count" — both name the same family. The set-overlap rule is the conservative way to encode "close enough" without going so loose that everything matches.
+
+**Precise:** Given an *ability* (the attacker action) tagged with one ATT&CK technique `target` and a *detection* (the defender alert) carrying a list of `attack_tags`, the rule treats the detection as **attributable** to the ability iff `{tag, parent(tag)} ∩ {target, parent(target)}` is non-empty for any `tag` in the detection's tags. Where `parent(X)` strips the dot-suffix: `parent("T1059.004") == "T1059"`, `parent("T1059") == "T1059"`. This rule is **symmetric** — direction doesn't matter — and **conservative** — it doesn't pull in tactic-level matches or unrelated techniques.
+
+**How it works (under the hood):**
+
+The unit test that proved it: an ability tagged `T1059` (parent technique, "Command and Scripting Interpreter") and a detection tagged `T1059.001` (sub-technique, "PowerShell") should attribute to each other. With the symmetric set-overlap rule, `target_set = {"T1059", "T1059"}` (collapses to `{"T1059"}`), `tag_set = {"T1059.001", "T1059"}`, intersection = `{"T1059"}`, non-empty → match. With a strict-equal rule, neither side equals the other → no match (false negative). With a tactic-only rule, every "execution" tag would match every "execution" ability → noise.
+
+The rule's cost: it cannot distinguish between two sibling sub-techniques (`T1059.004` vs `T1059.006` — bash vs python). For Phase 21's purpose that's fine — both are evidence of T1059 surface, and the scorecard's job is to assess detector *families*, not exact technique granularity.
+
+**Why it exists:** The straightforward implementation of "did the right rule fire?" — strict-equal on the ATT&CK ID — has a hidden assumption: that the ability author and the detector author chose the same level of specificity. They almost never do. Caldera's Stockpile ability list is more specific than CyberCat's detection-author tags. The set-overlap rule is the minimum amount of fuzz needed to handle that mismatch without over-attributing.
+
+**Where in CyberCat:** `labs/caldera/scorer.py` `_attribution_match()`. Called from `score()` per ability/rule combination. Determines whether a `GAP`-expected ability with a fired rule becomes `gap` (not attributable, the honest miss) or `unexpected-hit` (attributable, possible happy accident worth investigating).
+
+**Where else you'll see it:** Same shape appears in compliance / evidence-mapping work everywhere: NIST CSF subcategory matching, CIS Control mapping, ISO 27001 control inheritance. The general pattern is "one taxonomy is more specific than another; collapse to a common ancestor for comparison." Database systems use the equivalent for prefix index matching (`B-tree LIKE 'foo%'` is a subtree match, not strict equal).
+
+**Tradeoffs:** The conservative rule under-attributes within sibling sub-techniques. If Phase 22 needs finer attribution (e.g. PowerShell-specific detector tagged T1059.001 should NOT attribute to a bash ability tagged T1059.004), we'd swap to "match on full ID OR exact-target == exact-tag," which loses the parent/sub-technique fuzz. For a v1 coverage scorecard, the parent-collapsed rule is the right level of fuzz.
+
+**Related entries:** [MITRE ATT&CK (tactics, techniques, subtechniques)](#mitre-attck-tactics-techniques-subtechniques) · [MITRE Caldera adversary emulation](#mitre-caldera-adversary-emulation) · [Coverage scorecard methodology](#coverage-scorecard-methodology)
+
+---
+
+## Fetch-on-start agent enrollment
+*Introduced: Phase 21* · *Category: Project Pattern*
+
+**Intuition:** Don't bake an agent binary into the image that hosts it; fetch it from the C2 at container start when the env var is set. Decouples the host image from the agent's release cadence.
+
+**Precise:** A pattern where a containerized target machine's `Dockerfile` only creates the work directory (e.g. `mkdir -p /opt/sandcat`), and the `entrypoint.sh` conditionally fetches the agent binary at startup based on an env var (`if [ -n "$CALDERA_URL" ]`). The fetch is best-effort — wrapped in `2>/dev/null` and `( ... & ) || true` — so a missing/unreachable C2 (the common case when the corresponding profile isn't active) does not abort the rest of the entrypoint. The launched agent itself runs as a backgrounded child of PID 1 (sshd), so it does not block sshd's foreground exec.
+
+**How it works (under the hood):**
+
+Three properties make this pattern robust:
+
+1. **Idempotency.** The fetch checks `if [ ! -x /opt/sandcat/sandcat ]` first, so subsequent container restarts don't re-download. The agent binary is on the container's writable layer, not in the image, so it survives until `docker compose down -v`.
+
+2. **Graceful degradation.** With only `--profile agent` (no caldera), `CALDERA_URL` is empty (default in compose), the conditional is skipped entirely, and `lab-debian` boots identically to its pre-Phase-21 state. With both profiles up but Caldera not yet healthy (the 60s `start_period` race), the curl fetch fails silently and the agent isn't launched. The container's next restart picks it up.
+
+3. **Decoupled release cadence.** Bumping `CALDERA_VERSION` in `infra/caldera/Dockerfile` (the C2 server's image) does not require rebuilding `lab-debian`. The Sandcat binary served by the new Caldera is fetched at next container start; the host image is identical to before.
+
+The corresponding **anti-pattern** is baking the agent into the host image. That seems simpler at first but creates a coupling: every Caldera version bump requires rebuilding `lab-debian` (slow), and the agent's lifecycle is harder to debug because the binary's source-of-truth is hidden in image layers rather than at a clearly-named path.
+
+**Why it exists:** The Wazuh agent in `lab-debian` (Phase 8/9) is *baked* — it's installed via apt during image build, and configured at startup via env vars (`WAZUH_MANAGER`). That worked because Wazuh's release cadence is slow and we pin Wazuh 4.9.2 explicitly. Caldera releases more often and ships a custom Sandcat binary per version, so we wanted the looser coupling. After implementing it, this pattern is arguably better than the baked Wazuh approach for *both* agents — but rewriting the Wazuh path is out of scope for Phase 21.
+
+**Where in CyberCat:** `infra/lab-debian/Dockerfile:24-29` (just `mkdir -p /opt/sandcat`, no binary). `infra/lab-debian/entrypoint.sh:48-67` (conditional fetch + launch). Compose env vars at `infra/compose/docker-compose.yml` lab-debian.environment (`CALDERA_URL`, `CALDERA_GROUP`).
+
+**Where else you'll see it:** Most modern security agents (osquery, Falco, Splunk Universal Forwarder when bootstrapped via deployment server, Datadog agent installed via curl|sh) follow this pattern. Container observability agents (Sysdig, Aqua, Twistlock) generally fetch their kernel modules / userland binaries at start. Cloud-init scripts on EC2 / GCE almost always end with a `curl <bootstrap-url> | bash` step — same idea.
+
+**Tradeoffs:** A network-dependent startup is one more thing that can fail. The wrapping `|| true` and `( ... & )` mitigations are essential — without them, a Caldera outage would prevent sshd from starting and thus prevent operator triage of the Caldera outage. Logging the fetch result to `/var/log/sandcat.log` (visible in the lab_logs volume to `cct-agent`) is the durable record for "did Sandcat enroll today, yes/no."
+
+**Related entries:** [MITRE Caldera adversary emulation](#mitre-caldera-adversary-emulation) · [Pluggable telemetry adapter pattern](#pluggable-telemetry-adapter-pattern) · [Docker Compose profiles](#docker-compose-profiles)
+
+---
+
+## Coverage scorecard methodology
+*Introduced: Phase 21* · *Category: Verification*
+
+**Intuition:** A coverage scorecard is the analytics layer on top of an adversary-emulation run. For each attacker action, you record three things: did the action run, did your detection stack fire, did the right detection fire. The combinations produce a six-status enum that is much more useful than a binary "covered/not covered" because it surfaces the *interesting* failure modes (false negatives, unexpected hits) that drive the next round of detector design.
+
+**Precise:** Given a registry of `expectations` (per-ability: technique, expected_rule_id), a Caldera operation report (per-ability: status), and a detections-since-window response from the SIEM (per-detection: rule_id, attack_tags), the scorer assigns each row one of:
+
+- **covered** — ability ran, expected rule fired. The pass case.
+- **gap** — ability ran, `expected_rule_id == GAP` AND nothing attributable fired. The honest miss; goes on the Phase 22 punch list.
+- **false-negative** — ability ran, `expected_rule_id != GAP` AND that specific rule did NOT fire. Bug or brittleness; investigate before merging — the rule was supposed to be covered.
+- **unexpected-hit** — ability ran, `expected_rule_id == GAP` BUT a rule with overlapping ATT&CK tags fired. Possibly a happy accident worth promoting to "covered" in the next iteration; possibly mis-attribution worth tightening.
+- **ability-failed** — Caldera reported the ability did not execute on the agent (status != 0). Diagnostic only.
+- **ability-skipped** — ability was in `expectations.yml` but never appeared in the operation report at all. Diagnostic only — usually a UUID-resolution issue.
+
+The summary line tallies all six and surfaces a headline "covered N / total" number. **This headline is the deliverable — not a goal to maximize.** A scorecard showing "covered 2 / 25" with a clean ordered punch list is more useful than "covered 22 / 25" produced by tuning the abilities to match what already fires.
+
+**How it works (under the hood):**
+
+The scorer's three-input shape is what makes it generalize. Inputs:
+1. `expectations.yml` — author-curated, the source of truth for what *should* happen per ability.
+2. Caldera operation report (`/api/v2/operations/{id}/report`) — what Caldera observed: per-ability-per-agent status, output, time.
+3. CyberCat detections-since-window (`/v1/detections?since=<run_start>`) — what the SIEM caught during the operation's time window.
+
+The join: for each entry in `expectations.abilities`, look up the run status (skipped/failed/ok), look at the detections that fired anywhere in the run window, decide whether any of them are *attributable* to this ability (set-overlap rule on attack_tags), and pick the status. The output is a list of (ability, technique, expected, fired, status) tuples — the rows of the markdown table — plus a summary count of each status.
+
+The methodology is pluggable: replace Caldera with any other emulation engine that produces a per-ability outcome list, replace `/v1/detections` with any other SIEM's query API, and the scorer logic stays identical. That's why the scorer is ~150 lines of pure Python with no detection-stack-specific dependencies.
+
+**Why it exists:** "Did the platform detect that?" is a binary question; "did the platform detect that, and if so, was it the right rule?" is a 4-cell matrix; adding ability-failed/skipped makes it 6. Most teams stop at the binary version, which is why most coverage reports are uninformative. The six-status enum is what turns "we have 12% coverage" into "we have 12% coverage AND here are the four gaps that ate the most ability evidence AND here's the one false-negative that means a rule we thought we owned is actually broken."
+
+**Where in CyberCat:** `labs/caldera/scorer.py`. Outputs at `docs/phase-21-scorecard.md` and `docs/phase-21-scorecard.json`. Methodology documented in `labs/caldera/README.md` and `docs/decisions/ADR-0016-caldera-emulation.md`.
+
+**Where else you'll see it:** MITRE's own ATT&CK Navigator presents coverage in roughly this shape (heatmap colored by detection presence). Commercial coverage tools (AttackIQ, SCYTHE, AvocadoSec) all use a similar enum, sometimes with finer granularity (e.g. distinguishing "alerted" from "alerted with the wrong severity"). The pattern shows up outside security too — feature-flag rollout dashboards usually show a similar (covered/gap/unexpected) shape per cohort.
+
+**Tradeoffs:** The enum is opinionated — `unexpected-hit` could be split into "unexpected-but-correct" and "unexpected-and-wrong" if we had the human review bandwidth. We don't, so we collapse to one bucket and rely on the operator to read the row notes for context. The "ability-skipped" bucket is mostly noise (UUID resolution issues) but keeping it surfaces silently-broken UUIDs that would otherwise look like gaps.
+
+**Related entries:** [MITRE Caldera adversary emulation](#mitre-caldera-adversary-emulation) · [ATT&CK technique attribution (set-overlap rule)](#attck-technique-attribution-set-overlap-rule) · [Smoke tests vs unit tests vs integration tests](#smoke-tests-vs-unit-tests-vs-integration-tests) · [Pre-Phase-22 measurement vs guess](#pre-phase-22-measurement-vs-guess)
+
+---
+
+*End of entries — coverage of Phases 1–21. New concepts will be appended as they come up in future sessions; existing entries will be updated in place if a topic gets revisited in greater depth.*

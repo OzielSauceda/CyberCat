@@ -782,6 +782,52 @@ In the UI, both flows live on the incident detail page: "Merge into…"
 and "Split…" buttons in the header. Split mode renders a checkbox per
 event row in the timeline.
 
+## Running the coverage scorecard (Phase 21)
+
+Drives a MITRE Caldera operation against `lab-debian` and produces a
+markdown + JSON scorecard at `docs/phase-21-scorecard.{md,json}`. See
+`docs/decisions/ADR-0016-caldera-emulation.md` and
+`labs/caldera/README.md` for the full design.
+
+```bash
+# 1. Bring up CyberCat with both --profile agent and --profile caldera.
+#    First run: start.sh provisions CALDERA_API_KEY and recreates the
+#    caldera service. Allow ~60s for Caldera's start_period to elapse.
+bash start.sh --profile agent --profile caldera
+
+# 2. (First run only — re-run after every CALDERA_VERSION bump.)
+#    Resolve Stockpile ability UUIDs by querying /api/v2/abilities.
+#    Writes labs/caldera/{profile,expectations}.resolved.yml sidecars.
+docker compose -f infra/compose/docker-compose.yml exec -T backend \
+    python -m labs.caldera.build_operation_request --resolve-uuids \
+        --caldera http://caldera:8888
+
+# 3. Drive the full curated profile and produce the scorecard.
+#    Total runtime: ~3-10 minutes depending on network and ability set.
+bash labs/caldera/run.sh
+
+# 4. Read the result. The headline number IS the deliverable.
+less docs/phase-21-scorecard.md
+
+# 5. Smoke green to confirm the loop is intact end-to-end.
+bash labs/smoke_test_phase21.sh
+```
+
+If `pgrep sandcat` inside `lab-debian` returns empty after step 1,
+the Sandcat fetch may have raced ahead of Caldera's `start_period`.
+Restart `lab-debian` once Caldera's healthcheck passes:
+
+```bash
+docker compose -f infra/compose/docker-compose.yml \
+    --profile agent --profile caldera restart lab-debian
+```
+
+The Caldera UI is reachable at `http://127.0.0.1:8888` (red user, password
+in `infra/caldera/local.yml`). Bound to loopback only; never to the
+network. Don't run `--profile wazuh` and `--profile caldera`
+simultaneously without bumping `~/.wslconfig` to 8 GB — the always-on
++ Wazuh + Caldera footprint exceeds the default 6 GB cap.
+
 ## Regenerate the OpenAPI snapshot
 
 The backend writes `openapi.json` inside the container. Copy it to the host so the frontend codegen can read it:
