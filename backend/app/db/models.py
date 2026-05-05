@@ -180,10 +180,20 @@ class Incident(Base):
     correlator_rule: Mapped[str] = mapped_column(sa.Text, nullable=False)
     dedupe_key: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
 
+    # Phase 20 §C — set when this incident has been merged INTO another.
+    # Self-referential nullable FK. Split children do NOT set this (per
+    # ADR-0015 — splits use IncidentTransition rows for the audit link).
+    parent_incident_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("incidents.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
     __table_args__ = (
         UniqueConstraint("dedupe_key", name="uq_incidents_dedupe_key"),
         Index("ix_incidents_status_severity_opened", "status", "severity", "opened_at"),
         Index("ix_incidents_updated_at", "updated_at"),
+        Index("ix_incidents_parent_incident_id", "parent_incident_id"),
     )
 
 

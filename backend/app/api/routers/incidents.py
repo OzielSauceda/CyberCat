@@ -20,9 +20,11 @@ from app.api.schemas.incidents import (
     IncidentDetail,
     IncidentList,
     IncidentSummary,
+    MergeIncidentIn,
     NoteIn,
     NoteRef,
     RecommendedActionOut,
+    SplitIncidentIn,
     TimelineEvent,
     TransitionIn,
     TransitionOut,
@@ -382,6 +384,7 @@ async def get_incident(
         closed_at=inc.closed_at,
         correlator_rule=inc.correlator_rule,
         correlator_version=inc.correlator_version,
+        parent_incident_id=inc.parent_incident_id,
         entities=entities,
         detections=detections,
         timeline=timeline,
@@ -564,3 +567,115 @@ async def get_recommended_actions(
         )
         for r in recs
     ]
+
+
+# ---------------------------------------------------------------------------
+# Phase 20 §C3 — merge / split routes
+# ---------------------------------------------------------------------------
+
+_MERGE_ERROR_TO_STATUS = {
+    "self_merge": 422,
+    "source_missing": 404,
+    "target_missing": 404,
+    "source_merged": 409,
+    "target_closed": 409,
+}
+
+_SPLIT_ERROR_TO_STATUS = {
+    "empty_selection": 422,
+    "source_missing": 404,
+    "source_closed": 422,
+    "events_not_in_source": 422,
+    "entities_not_in_source": 422,
+}
+
+
+@router.post(
+    "/{incident_id}/merge-into",
+    response_model=IncidentDetail,
+    responses={
+        404: {"model": ErrorEnvelope},
+        409: {"model": ErrorEnvelope},
+        422: {"model": ErrorEnvelope},
+    },
+)
+async def merge_into_incident(
+    incident_id: uuid.UUID,
+    body: MergeIncidentIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User | SystemUser = Depends(require_analyst),
+) -> IncidentDetail:
+    """Merge this incident (source) into the target. Source becomes
+    status='merged' and parent_incident_id=target.id. Returns the
+    refreshed target incident.
+    """
+    from app.correlation.merge import MergeError, merge_incidents
+    actor = getattr(current_user, "email", "system:unknown")
+    actor_user_id = await resolve_actor_id(current_user, db)
+
+    try:
+        target = await merge_incidents(
+            db,
+            source_id=incident_id,
+            target_id=body.target_id,
+            reason=body.reason,
+            actor=actor,
+            actor_user_id=actor_user_id,
+        )
+    except MergeError as exc:
+        await db.rollback()
+        status_code = _MERGE_ERROR_TO_STATUS.get(exc.code, 400)
+        raise HTTPException(
+            status_code=status_code,
+            detail={"error": {"code": exc.code, "message": str(exc)}},
+        )
+
+    await db.commit()
+
+    # Return the refreshed target with all junctions populated.
+    return await get_incident(target.id, db, current_user)
+
+
+@router.post(
+    "/{incident_id}/split",
+    response_model=IncidentDetail,
+    status_code=201,
+    responses={
+        404: {"model": ErrorEnvelope},
+        422: {"model": ErrorEnvelope},
+    },
+)
+async def split_incident_route(
+    incident_id: uuid.UUID,
+    body: SplitIncidentIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User | SystemUser = Depends(require_analyst),
+) -> IncidentDetail:
+    """Split a subset of evidence off the source incident into a new
+    child incident. Returns the new child incident.
+    """
+    from app.correlation.split import SplitError, split_incident
+    actor = getattr(current_user, "email", "system:unknown")
+    actor_user_id = await resolve_actor_id(current_user, db)
+
+    try:
+        child = await split_incident(
+            db,
+            source_id=incident_id,
+            event_ids=body.event_ids,
+            entity_ids=body.entity_ids,
+            reason=body.reason,
+            actor=actor,
+            actor_user_id=actor_user_id,
+        )
+    except SplitError as exc:
+        await db.rollback()
+        status_code = _SPLIT_ERROR_TO_STATUS.get(exc.code, 400)
+        raise HTTPException(
+            status_code=status_code,
+            detail={"error": {"code": exc.code, "message": str(exc)}},
+        )
+
+    await db.commit()
+
+    return await get_incident(child.id, db, current_user)

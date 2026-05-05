@@ -5,7 +5,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.enums import (
     ActionClassification,
@@ -156,6 +156,7 @@ class IncidentDetail(BaseModel):
     closed_at: datetime | None
     correlator_rule: str
     correlator_version: str
+    parent_incident_id: uuid.UUID | None = None  # Phase 20 §C — set for merged sources
 
     entities: list[EntityRef]
     detections: list[DetectionRef]
@@ -164,3 +165,16 @@ class IncidentDetail(BaseModel):
     actions: list[ActionSummary]
     transitions: list[TransitionRef]
     notes: list[NoteRef]
+
+
+# --- Phase 20 §C3: merge / split request + response shapes ---
+
+class MergeIncidentIn(BaseModel):
+    target_id: uuid.UUID
+    reason: str = Field(..., min_length=1, max_length=500)
+
+
+class SplitIncidentIn(BaseModel):
+    event_ids: list[uuid.UUID] = Field(default_factory=list)
+    entity_ids: list[uuid.UUID] = Field(default_factory=list)
+    reason: str = Field(..., min_length=1, max_length=500)

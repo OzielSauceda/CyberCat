@@ -57,6 +57,7 @@ class IncidentStatus(str, enum.Enum):
     resolved = "resolved"
     closed = "closed"
     reopened = "reopened"
+    merged = "merged"  # Phase 20 §C — source incident absorbed into another
 
 
 class IncidentEventRole(str, enum.Enum):

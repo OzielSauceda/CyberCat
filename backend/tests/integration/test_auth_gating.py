@@ -53,6 +53,8 @@ ANALYST_ROUTES = [
     ("POST",   f"/v1/responses/{_FIXED_ID}/revert"),
     ("POST",   f"/v1/incidents/{_FIXED_ID}/transitions"),
     ("POST",   f"/v1/incidents/{_FIXED_ID}/notes"),
+    ("POST",   f"/v1/incidents/{_FIXED_ID}/merge-into"),     # Phase 20 §C3
+    ("POST",   f"/v1/incidents/{_FIXED_ID}/split"),          # Phase 20 §C3
     ("POST",   f"/v1/evidence-requests/{_FIXED_ID}/collect"),
     ("POST",   f"/v1/evidence-requests/{_FIXED_ID}/dismiss"),
     ("POST",   "/v1/lab/assets"),
