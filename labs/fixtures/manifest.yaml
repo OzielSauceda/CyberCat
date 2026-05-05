@@ -83,3 +83,20 @@
       - {value: "198.51.100.77", kind: "ip"}
   must_fire: [py.blocked_observable_match]
   must_not_fire: [py.process.suspicious_child, py.auth.failed_burst, py.auth.anomalous_source_success]
+
+# --- Phase 20 §A3: webshell_drop ---
+# Linux web-shell scenario — inbound HTTP → .php on disk → apache2 spawns
+# id/cat/wget child processes (the web shell executing attacker commands).
+#
+# Detector reality (current platform state — see docs/phase-20-plan.md §A3):
+#   * py.process.suspicious_child has no apache2→child branch (Windows-only
+#     branches: encoded PowerShell, Office→shell, rundll32+script).
+#   * No detector matches inbound network.connection or .php file.created
+#     in a web root — both are Phase 22+ candidates.
+#
+# Outcome: every detector silent. Empty must_fire is intentional. The
+# manifest entry asserts the gap (must_not_fire) so any future detector
+# addition that closes the gap fails the test until the manifest is updated.
+- fixture: scenario/webshell_drop.jsonl
+  must_fire: []
+  must_not_fire: [py.process.suspicious_child, py.auth.failed_burst, py.auth.anomalous_source_success, py.blocked_observable_match]

