@@ -298,7 +298,7 @@ def resolve_uuids(here: Path, caldera_url: str, key: str) -> int:
 
     _dump_yaml(profile, here / "profile.resolved.yml")
     _dump_yaml(expectations, here / "expectations.resolved.yml")
-    print(f"Wrote profile.resolved.yml + expectations.resolved.yml.", file=sys.stderr)
+    print("Wrote profile.resolved.yml + expectations.resolved.yml.", file=sys.stderr)
     if unresolved:
         print(f"WARNING: {len(unresolved)} placeholder(s) did not resolve:", file=sys.stderr)
         for u in unresolved:
