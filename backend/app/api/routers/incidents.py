@@ -628,7 +628,7 @@ async def merge_into_incident(
         raise HTTPException(
             status_code=status_code,
             detail={"error": {"code": exc.code, "message": str(exc)}},
-        )
+        ) from exc
 
     await db.commit()
 
@@ -674,7 +674,7 @@ async def split_incident_route(
         raise HTTPException(
             status_code=status_code,
             detail={"error": {"code": exc.code, "message": str(exc)}},
-        )
+        ) from exc
 
     await db.commit()
 
