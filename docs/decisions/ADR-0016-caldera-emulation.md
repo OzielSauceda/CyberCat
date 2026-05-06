@@ -1,7 +1,7 @@
 # ADR-0016 — Caldera adversary emulation + coverage scorecard (Phase 21)
 
-**Date:** 2026-05-05
-**Status:** Accepted
+**Date:** 2026-05-05 (amended 2026-05-06 — see "Day-2 amendments")
+**Status:** Accepted (with amendments)
 **Deciders:** Oziel (owner)
 **Builds on:** ADR-0006 (attack simulator), ADR-0011 (direct-agent telemetry), ADR-0015 (incident merge/split)
 
@@ -219,3 +219,207 @@ projected first-run number is 2-3 covered out of 25 (~8-12%). If much
 higher, attribution may be too loose. If much lower, `py.auth.failed_burst`
 may have a brittle parse path under Caldera-driven sshd traffic.
 Either direction warrants investigation before the v1.1 tag.
+
+> **Day-2 result note:** The first run came in at **0/17 covered**, not
+> 2-3/25. The denominator dropped because 8 of the 25 stockpile slugs
+> didn't exist on the 4.2.0 line we ended up pinning, and the numerator
+> was 0 because (a) the 5 custom abilities never dispatched (their
+> local IDs aren't registered in Caldera's stockpile — Phase 21.5
+> follow-up) and (b) the one covered case (sudo brute-force) was raced
+> by Caldera's cleanup deadman. The 3 abilities that did execute
+> cleanly all hit known Phase 22 gap surfaces. See "Day-2 amendments"
+> below and `docs/phase-21-summary.md` for the full read.
+
+---
+
+## Day-2 amendments (2026-05-06)
+
+Phase 21's first-run pickup surfaced four classes of issue that
+Decisions 1–7 above didn't anticipate. None of them invalidate the
+original architecture; all of them required concrete patches that are
+now baked into the working tree. Captured here for posterity so the
+next operator (or the next time we bump `CALDERA_VERSION`) doesn't
+re-discover them in the wild.
+
+### A. Pin: Caldera 5.0.0 → 4.2.0
+
+Decision 1 said "MITRE Caldera 5.0.0, pinned." The 5.0.0 first-run
+launches `python3 server.py` which crashes on
+`ValueError: No directory exists at '/usr/src/app/plugins/magma/dist/assets'`.
+Caldera 5.0.0 introduced the `magma` Vue 3 UI plugin; the upstream
+install instructions assume the operator hand-runs
+`cd plugins/magma && npm install && npm run build` before launching
+the server. We don't ship Node.js in the image and the build adds
+~300 MB + first-time-run latency.
+
+**Pivot:** pin to **Caldera 4.2.0** (last release with the older
+bundled-static-files Vue UI). All Phase 21 scorer/runner code was
+verified compatible with 4.2.0's `/api/v2` surface — Decision 1's
+"audit every dependency" rationale still holds, just one major version
+back. Future bump to 5.x requires the npm-build step in the Dockerfile.
+
+### B. Transitive-dep pin set
+
+Caldera 4.2.0 ships with permissive lower-bound-only pins
+(`websockets>=10.3`, no upper-bound on `cryptography` or `yarl`).
+Modern resolvers pull versions whose APIs Caldera was never tested
+against:
+
+- **`websockets<14`** — 14.0 rewrote the server connection API;
+  Caldera's internal `/system/ready` probe gets a `1011 internal
+  error` close on startup.
+- **`yarl<1.10`** — 1.10+ added strict host-string validation in
+  `_encode_host` that rejects `:port`. `aiohttp 3.8.4` still passes
+  `request.host` (the raw `Host` header, which legitimately includes
+  `:port` for non-default ports) directly to `URL.build(host=...)`.
+  Result: every HTTP request with `Host: <name>:8888` raised
+  `ValueError` mid-route-resolve and aiohttp returned a generic 500
+  with **no log** (Caldera's `setup_logger` mutes everything outside
+  `aiohttp.server` and `asyncio`). The clearest "silent failure" we've
+  hit on the project.
+- **`python:3.11-slim-bookworm`** instead of `python:3.11-slim` —
+  the floating tag now resolves to Debian trixie (gcc 14), which
+  hard-errors on `donut-shellcode`'s legacy implicit-int/pointer C
+  via `-Werror=int-conversion`. Bookworm's gcc 12 leaves them as
+  warnings.
+
+All four pins are in `infra/caldera/Dockerfile` with rationale
+comments. Touching any of them requires testing the bring-up path end
+to end.
+
+### C. API-key alignment via entrypoint
+
+Decision 3 said "`--insecure` is acceptable." It is — but `--insecure`
+also means Caldera loads `conf/default.yml` instead of our custom
+`conf/local.yml`. `default.yml` hardcodes `api_key_red: ADMIN123` and
+`api_key_blue: BLUEADMIN123`. Our scorer reads `CALDERA_API_KEY` from
+`infra/compose/.env` (auto-provisioned by `start.sh`). Without
+alignment, every `KEY:`-authenticated request from the scorer gets
+401 silently.
+
+**Resolution:** new `infra/caldera/entrypoint.sh` patches the keys in
+place at container start using `sed`. The script is the new
+`ENTRYPOINT`; `--insecure` is now an internal arg. `.env` and Caldera
+agree by construction.
+
+### D. Healthcheck endpoint mismatch
+
+Decision 1 didn't specify the healthcheck path; the original compose
+block hit `/api/v2/health`. That endpoint is **5.x only**. On 4.2.0,
+the substitute is `/enter`, a public 302-redirect-to-login route that
+`curl -sf` accepts (only 4xx/5xx fail). Both `infra/compose/docker-compose.yml`
+and `labs/caldera/run.sh` preflight check were patched.
+
+### E. API field-name drift
+
+Caldera 4.2.0's `PlannerSchema` declares `planner_id =
+ma.fields.String(data_key='id')`, so the wire key is `id` not
+`planner_id`. The 4.2.0 `/api/v2/operations/<id>/report` endpoint is
+**POST-only** (5.x added GET). The 4.2.0 `AdversarySchema` accepts
+both `id` and `adversary_id` (it has a `pre_load` `fix_id` hook).
+`labs/caldera/build_operation_request.py` and `labs/caldera/run.sh`
+both patched to handle the 4.2.0 surface; the dual-shape handling is
+explicit so a future bump back to 5.x continues to work.
+
+### F. Scorer report-shape compatibility
+
+Caldera's operation report shape varies by major version:
+- 5.x: `report.steps = { paw: [{ability_id, status, ...}, ...] }`.
+- 4.2.0: `report.steps = { paw: { "steps": [...] } }` plus a separate
+  `report.host_group = [ {paw, links: [{ability: {...}, ...}]} ]`.
+
+`labs/caldera/scorer.py` was patched with explicit dual-shape
+extraction in `score()`. Same pattern as Decision 7's symmetric
+attribution rule — the scorer is the contract surface and stays
+portable across the version pin.
+
+### G. Operation-completion semantics
+
+Decision 4's "the fetch may race ahead of Caldera's 60-second
+`start_period`" anticipated the Sandcat-fetch race. It didn't
+anticipate the **`auto_close=true` deadman race** at the *operation*
+level. Caldera 4.2.0's atomic planner injects a cleanup link
+(`status=-3`) after each ability; if a brute-force ability hasn't
+completed its 4-failures-in-60s window before the cleanup fires, the
+brute-force is interrupted and the auth detector never sees enough
+events. This is the mechanism behind the first-run "0 covered" — the
+`SUDO Brute Force - Debian` ability ran but its window didn't
+register on `auth.log` before deadman cleanup. Phase 21.5 candidate:
+either disable the cleanup link for time-window abilities, or
+generalize `auth_failed_burst.py` to PAM-failure-source (which would
+catch the partial brute-force regardless of cleanup race).
+
+### H. Custom-ability registration
+
+Decision 5 said "five custom abilities authored in
+`labs/caldera/abilities/`." The five YAML files are linter-clean and
+the resolver leaves their local IDs unchanged in
+`profile.resolved.yml`, but **Caldera's atomic planner only
+dispatches abilities present in its in-process registry**. The
+local YAML files are not auto-loaded. Phase 21.5 candidate: write
+`labs/caldera/upload_custom_abilities.py` that POSTs each YAML to
+`/api/v2/abilities` so the IDs are registered, then verify the
+returned `ability_id` matches what `profile.yml` references.
+
+Without this step, all 5 custom abilities are permanently
+`ability-skipped` in every scorecard run. This is the single biggest
+slice missing from the first scorecard's coverage signal.
+
+### I. Sequencing decision (post-first-run)
+
+The original Phase 21 → Phase 22 → Phase 21.5 path assumed Phase 21's
+first scorecard would directly evidence Phase 22's punch list. With 14
+of 17 abilities not running cleanly, the scorecard's *measured*
+signal is thin. Two options:
+
+1. **Phase 21.5 first** (fix the test rigging: upload custom abilities,
+   add a fact source, resolve the cleanup deadman race), then re-run
+   the scorecard, then Phase 22 from clean evidence.
+2. **Phase 22 first** (build the four detectors Phase 20 evidenced
+   plus the PAM broadening from Phase 21's sudo-brute-force finding),
+   then Phase 21.5 to re-run the scorecard as a *regression test*
+   instead of a baseline.
+
+**Chosen: Phase 22 first.** Phase 20's gap evidence is already
+concrete (5 scenarios, 4 documented gaps, named code paths). Phase
+21's run mostly re-confirmed that evidence; the scorecard's measured
+signal isn't telling us much we didn't already know. The product
+value is in the detectors, not the rigging. Phase 22 detectors can
+be authored against unit tests + the existing Phase 20 scenarios
+without Caldera in the picture; once they exist, Phase 21.5's
+scorecard re-run *validates* them with concrete coverage rather than
+re-measuring gaps. Reverse order would mean spending a session fixing
+Caldera content shapes that don't ship product value.
+
+The one Phase-21 finding that DOES feed Phase 22: broaden
+`auth_failed_burst.py` (or add a sibling) to fire on PAM failures
+regardless of source binary — sshd-only is too narrow, sudo-source
+brute force is invisible.
+
+---
+
+## Verification (revised post-first-run)
+
+The Day-1 verification block above (`/api/v2/health`, `pgrep sandcat`)
+is calibrated to the original 5.0.0 plan. The 4.2.0-pinned working
+sequence is:
+
+```bash
+bash start.sh --profile agent --profile caldera         # 1. bring-up (~5 min on first build)
+curl -sf http://127.0.0.1:8888/enter                    # 2. caldera healthy (302 OK)
+docker compose -f infra/compose/docker-compose.yml \
+    exec lab-debian grep "Beacon.*ALIVE" \
+    /var/log/sandcat.log                                # 3. sandcat beaconed
+docker compose -f infra/compose/docker-compose.yml \
+    exec -T -e CALDERA_API_KEY="$KEY" backend \
+    python -m labs.caldera.build_operation_request \
+        --resolve-uuids --caldera http://caldera:8888   # 4. UUIDs resolved
+bash labs/caldera/run.sh                                # 5. scorecard generated (~15-20 min)
+bash labs/smoke_test_phase21.sh                         # 6. smoke green (T1+T2+T3+T5; T4 known partial pending Phase 22 PAM broadening)
+```
+
+The first scorecard's headline is now **0/17 covered, 3 gap, 14
+ability errors**. That number is honest given the current platform
+state; it improves to a meaningful baseline after Phase 22 detectors
+ship and Phase 21.5 fixes the test rigging. See
+`docs/phase-21-summary.md` for the row-by-row read.

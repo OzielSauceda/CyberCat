@@ -19,57 +19,36 @@
 profile_name: cybercat-phase21-linux-baseline
 
 abilities:
-  - id: STOCKPILE:bash:linux:id
-    name: bash recon (id)
+  - id: STOCKPILE:sh:linux:identify-active-user
+    name: identify active user (id / whoami)
     technique: T1059.004
     expected_rule_id: GAP
     status: gap
-    notes: "Linux bash exec — process_suspicious_child is Windows-only (Gap 1)."
+    notes: "Linux sh exec — process_suspicious_child is Windows-only (Gap 1)."
 
-  - id: STOCKPILE:bash:linux:whoami
-    name: bash recon (whoami)
-    technique: T1059.004
-    expected_rule_id: GAP
-    status: gap
-    notes: "Same surface as #1 — Linux bash exec undetected."
-
-  - id: STOCKPILE:bash:linux:apache-webshell-id
-    name: webshell whoami (apache2 → sh → id)
-    technique: T1059.004
-    expected_rule_id: GAP
-    status: gap
-    notes: "apache2-as-parent chain undetected (Gap 1, A3 evidence)."
-
-  - id: STOCKPILE:bash:linux:ps-ef
-    name: process listing (ps -ef)
+  - id: STOCKPILE:sh:linux:find-user-processes
+    name: process listing (find user processes)
     technique: T1057
     expected_rule_id: GAP
     status: gap
     notes: "No process-discovery detector exists — Phase 22 input."
 
-  - id: STOCKPILE:bash:linux:cat-etc-hosts
-    name: hosts read (cat /etc/hosts)
+  - id: STOCKPILE:sh:linux:find-system-network-connections
+    name: network connection enumeration
     technique: T1018
     expected_rule_id: GAP
     status: gap
-    notes: "No file-read detector for system files — Phase 22 input."
+    notes: "No remote-system-discovery detector — Phase 22 input."
 
-  - id: STOCKPILE:bash:linux:cat-etc-passwd
-    name: passwd read (cat /etc/passwd)
+  - id: STOCKPILE:sh:linux:access-etc-passwd-local
+    name: /etc/passwd read (local)
     technique: T1003.008
     expected_rule_id: GAP
     status: gap
     notes: "Credential-discovery file read undetected — Phase 22 input."
 
-  - id: STOCKPILE:bash:linux:cat-etc-sudoers
-    name: sudoers read (cat /etc/sudoers)
-    technique: T1003.008
-    expected_rule_id: GAP
-    status: gap
-    notes: "Same category as #6 — sudoers exposure."
-
-  - id: STOCKPILE:bash:linux:find-home-pdf
-    name: dir enum (find /home -name *.pdf)
+  - id: STOCKPILE:sh:linux:find-files
+    name: filesystem enumeration (find files)
     technique: T1083
     expected_rule_id: GAP
     status: gap
@@ -89,36 +68,17 @@ abilities:
     status: gap
     notes: "Download-and-execute pattern undetected (Gap 1, A1+A2 evidence)."
 
-  - id: STOCKPILE:bash:linux:http-post-beacon
-    name: HTTP beacon (curl -X POST)
-    technique: T1071.001
-    expected_rule_id: py.blocked_observable_match
-    status: partial
-    notes: |
-      Will fire py.blocked_observable_match IF the operator pre-seeded
-      198.51.100.77 as a blocked observable. Even when it fires, no
-      correlator promotes blocked_observable_match → Incident (Gap 2),
-      so the analyst sees nothing. Phase 22 input.
-
-  - id: STOCKPILE:ssh:linux:brute-force
-    name: SSH brute-force (5× wrong password)
+  - id: STOCKPILE:sh:linux:sudo-brute-force-debian
+    name: SUDO brute-force
     technique: T1110.001
     expected_rule_id: py.auth.failed_burst
     status: covered
     notes: |
-      Direct match to backend/app/detection/rules/auth_failed_burst.py.
-      Threshold: 4 failures within 60s windowed by user.
-
-  - id: STOCKPILE:ssh:linux:success-after-brute
-    name: clean login from new IP after brute-force
-    technique: T1078
-    expected_rule_id: py.auth.anomalous_source_success
-    status: covered
-    notes: |
-      Match to auth_anomalous_source_success.py:36-42 — gates on
-      failure_count >= 1 from Redis corr:auth_failures:<user>. Only
-      fires because brute-force ability ran first. Clean cred theft
-      (no preceding failures) is Gap 3 and is exercised by ability #12.
+      Match to backend/app/detection/rules/auth_failed_burst.py.
+      Threshold: 4 failures within 60s windowed by user. Stockpile's
+      sudo-brute-force-debian repeatedly invokes `sudo` with bad
+      passwords; sshd/PAM logs the failures the same way ssh login
+      failures are logged.
 
   - id: linux_creds_aws_read
     name: clean cred-theft + AWS creds read + login from new IP
@@ -145,58 +105,44 @@ abilities:
     status: gap
     notes: "No account-manipulation detector — Phase 22 input."
 
-  - id: STOCKPILE:bash:linux:passwd-realuser
-    name: password change (passwd realuser)
+  - id: STOCKPILE:sh:linux:change-user-password-via-passwd
+    name: password change (passwd)
     technique: T1098
     expected_rule_id: GAP
     status: gap
-    notes: "Same category as #15 — account manipulation."
+    notes: "Same category as useradd — account manipulation undetected."
 
-  - id: STOCKPILE:bash:linux:cron-persistence
+  - id: STOCKPILE:sh:linux:cron-add-script-to-etc-cron-d-folder
     name: cron persistence (/etc/cron.d/...)
     technique: T1546.003
     expected_rule_id: GAP
     status: gap
     notes: "No persistence detector — Phase 22 input."
 
-  - id: STOCKPILE:bash:linux:webshell-drop
-    name: webshell drop (/var/www/.../shell.php)
-    technique: T1505.003
-    expected_rule_id: GAP
-    status: gap
-    notes: "No file-write detector for web roots — Phase 22 input."
-
-  - id: STOCKPILE:bash:linux:bash-history-wipe
-    name: bash history wipe (> ~/.bash_history)
+  - id: STOCKPILE:sh:linux:clear-bash-history
+    name: bash history wipe
     technique: T1070.003
     expected_rule_id: GAP
     status: gap
     notes: "No indicator-removal detector — Phase 22 input."
 
-  - id: STOCKPILE:bash:linux:tar-loot
-    name: tarball stage (tar czf /tmp/loot.tar.gz)
+  - id: STOCKPILE:sh:linux:data-compressed-nix-tar-folder-or-file
+    name: tarball stage (data compressed)
     technique: T1560.001
     expected_rule_id: GAP
     status: gap
     notes: "Staging-archive pattern undetected (A4 evidence)."
 
-  - id: STOCKPILE:bash:linux:scp-exfil
-    name: scp exfil
+  - id: STOCKPILE:sh:linux:scp-remote-file-copy-push
+    name: scp exfil (push)
     technique: T1048.002
     expected_rule_id: GAP
     status: gap
     notes: "No alt-protocol exfil detector — Phase 22 input."
 
-  - id: STOCKPILE:bash:linux:systemd-service
+  - id: STOCKPILE:sh:linux:create-systemd-service
     name: systemd persistence (write .service file)
     technique: T1543.002
     expected_rule_id: GAP
     status: gap
     notes: "No systemd-unit detector — Phase 22 input."
-
-  - id: STOCKPILE:bash:linux:uname-hostnamectl
-    name: host enumeration (uname -a; hostnamectl)
-    technique: T1082
-    expected_rule_id: GAP
-    status: gap
-    notes: "No system-info detector — Phase 22 input."

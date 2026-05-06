@@ -62,19 +62,28 @@ fi
 # ---------- T1: caldera healthy ----------
 
 header "T1 — caldera service healthy"
-if curl -sf "$CALDERA/api/v2/health" >/dev/null; then
-    pass "caldera /api/v2/health → 200"
+# Caldera 4.2.0 has no /api/v2/health (5.x only); /enter is a public
+# route that 302-redirects unauthenticated requests, which curl -sf
+# accepts (only 4xx/5xx fail).
+if curl -sf "$CALDERA/enter" >/dev/null; then
+    pass "caldera /enter → 302"
 else
-    fail "caldera /api/v2/health unreachable at $CALDERA"
+    fail "caldera /enter unreachable at $CALDERA"
 fi
 
-# ---------- T2: sandcat process running ----------
+# ---------- T2: sandcat agent has beaconed ----------
 
-header "T2 — sandcat process running in lab-debian"
-if docker compose -f "$COMPOSE_FILE" exec -T lab-debian pgrep -af sandcat >/dev/null 2>&1; then
-    pass "sandcat process detected via pgrep"
+header "T2 — sandcat agent has beaconed in lab-debian"
+# The sandcat binary self-deletes after launch (a stealth feature of
+# the gocat agent), so /opt/sandcat/sandcat is absent at steady state
+# and `pgrep sandcat` won't match the process either. Asserting that
+# /var/log/sandcat.log records a "Beacon (HTTP): ALIVE" line is the
+# robust check — that's the agent telling us it has reached Caldera.
+if docker compose -f "$COMPOSE_FILE" exec -T lab-debian \
+        grep -q "Beacon.*ALIVE" //var/log/sandcat.log 2>/dev/null; then
+    pass "sandcat beaconed at least once (Beacon ALIVE in /var/log/sandcat.log)"
 else
-    fail "no sandcat process in lab-debian (check /var/log/sandcat.log inside the container)"
+    fail "no Beacon ALIVE line in /var/log/sandcat.log — Sandcat never reached Caldera"
 fi
 
 # ---------- T3: agent enrolled ----------
@@ -94,11 +103,13 @@ fi
 header "T4 — covered ability fires expected detector"
 RUN_START=$(date -u +"%Y-%m-%dT%H:%M:%S+00:00")
 
-# Pick the SSH brute-force ability id from expectations.yml. The smoke
-# does NOT need profile.resolved.yml — single-ability mode passes the
-# id straight through; build_operation_request.py validates it against
-# Caldera's /api/v2/abilities at run time.
-if bash "$SCRIPT_DIR/caldera/run.sh" --single-ability "STOCKPILE:ssh:linux:brute-force" --no-score \
+# Pick the sudo-brute-force-debian ability — Caldera 4.2.0's stockpile
+# names this `sh:linux:sudo-brute-force-debian` (the SSH-specific
+# ssh:linux:brute-force ability does not exist on the 4.2.0 line; we
+# moved to the sudo variant in profile.yml during the Phase 21 4.2.0
+# pin). It triggers PAM/auth.log failure events the same way sshd does,
+# so py.auth.failed_burst is still the expected detector.
+if bash "$SCRIPT_DIR/caldera/run.sh" --single-ability "STOCKPILE:sh:linux:sudo-brute-force-debian" --no-score \
         > "/tmp/phase21-smoke-T4.log" 2>&1; then
     sleep 5  # backend ingest + correlator window settle
     HITS=$(curl -sf "${AUTH_HEADER[@]}" \

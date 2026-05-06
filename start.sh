@@ -201,6 +201,16 @@ if caldera_profile_active; then
     echo "  Recreating caldera with the new key..."
     docker compose -f "$COMPOSE_FILE" "${PROFILE_FLAGS[@]}" up -d --force-recreate caldera
   fi
+
+  # Phase 21: lab-debian's entrypoint reads CALDERA_URL to decide whether
+  # to fetch and launch Sandcat (Caldera's Linux agent). Default it to
+  # the in-network Caldera service URL if not already set, so the agent
+  # enrolls automatically on first run.
+  if ! grep -q "^CALDERA_URL=" "$ENV_FILE" 2>/dev/null; then
+    echo "CALDERA_URL=http://caldera:8888" >> "$ENV_FILE"
+    echo "✓ CALDERA_URL=http://caldera:8888 written to $ENV_FILE"
+    docker compose -f "$COMPOSE_FILE" "${PROFILE_FLAGS[@]}" up -d --force-recreate lab-debian
+  fi
 fi
 
 echo

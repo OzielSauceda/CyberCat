@@ -25,6 +25,15 @@ COMPOSE_FILE="$REPO_ROOT/infra/compose/docker-compose.yml"
 ENV_FILE="$REPO_ROOT/infra/compose/.env"
 API="${CCT_API:-http://localhost:8000}"
 CALDERA="${CALDERA_API:-http://127.0.0.1:8888}"
+# Use labs/caldera/.tmp/ as the run scratch dir. Two reasons:
+#   1) /tmp under Git Bash maps to C:\Users\<user>\AppData\Local\Temp
+#      and Python on Windows can't reach Bash-style /tmp/foo paths.
+#   2) The backend container has labs/ bind-mounted at /app/labs, so
+#      the scorer running inside the container can read this same
+#      scratch dir as /app/labs/caldera/.tmp/.
+RUN_TMP="$SCRIPT_DIR/.tmp"
+RUN_TMP_IN_CONTAINER="/app/labs/caldera/.tmp"
+mkdir -p "$RUN_TMP"
 
 # ---------- args ----------
 SINGLE_ABILITY=""
@@ -63,8 +72,10 @@ export CALDERA_API_KEY="$CALDERA_KEY"
 
 # ---------- preflight ----------
 echo "── preflight ──────────────────────────────────"
-if ! curl -sf "$CALDERA/api/v2/health" >/dev/null; then
-    echo "  ✗ caldera /api/v2/health unreachable at $CALDERA" >&2
+# Caldera 4.2.0 has no /api/v2/health (5.x only); /enter is a public
+# route that 302-redirects unauth'd requests, which curl -sf accepts.
+if ! curl -sf "$CALDERA/enter" >/dev/null; then
+    echo "  ✗ caldera /enter unreachable at $CALDERA" >&2
     exit 1
 fi
 echo "  ✓ caldera healthy"
@@ -83,9 +94,15 @@ echo "  ✓ ${AGENT_COUNT} agent(s) enrolled"
 echo
 echo "── building operation payload ────────────────"
 RUN_START=$(date -u +"%Y-%m-%dT%H:%M:%S+00:00")
-PAYLOAD=$(python3 "$SCRIPT_DIR/build_operation_request.py" \
-    --caldera "$CALDERA" --key "$CALDERA_KEY" --group red \
-    --here "$SCRIPT_DIR")
+# Run the build script inside the backend container so it picks up
+# PyYAML (which isn't always installed in the host's system python and
+# the script's hand-rolled YAML fallback chokes on yaml.safe_dump's
+# multi-line quoted strings, returning an empty atomic_ordering).
+PAYLOAD=$(docker compose -f "$COMPOSE_FILE" exec -T \
+    -e CALDERA_API_KEY="$CALDERA_KEY" backend \
+    python -m labs.caldera.build_operation_request \
+        --caldera "http://caldera:8888" --key "$CALDERA_KEY" --group red \
+        --here "//app/labs/caldera")
 if [ -z "$PAYLOAD" ]; then
     echo "  ✗ build_operation_request.py produced empty payload" >&2
     exit 1
@@ -110,7 +127,7 @@ fi
 # ---------- start operation ----------
 echo
 echo "── starting Caldera operation ────────────────"
-TMP_OP=$(mktemp -t caldera-op-XXXXXX.json)
+TMP_OP="$RUN_TMP/caldera-op-resp.json"
 HTTP_CODE=$(curl -s -o "$TMP_OP" -w "%{http_code}" \
     -X POST -H "KEY: $CALDERA_KEY" \
     -H "Content-Type: application/json" -d "$PAYLOAD" \
@@ -122,10 +139,10 @@ if [ "$HTTP_CODE" != "200" ] && [ "$HTTP_CODE" != "201" ]; then
     exit 1
 fi
 OPERATION_ID=$(python3 -c "
-import json
-d = json.load(open('$TMP_OP'))
+import json, sys
+d = json.load(sys.stdin)
 print(d.get('id') or d.get('operation_id') or '')
-")
+" < "$TMP_OP")
 rm -f "$TMP_OP"
 if [ -z "$OPERATION_ID" ]; then
     echo "  ✗ POST succeeded but no operation id in response body." >&2
@@ -134,9 +151,13 @@ fi
 echo "  ✓ operation $OPERATION_ID started"
 
 # ---------- poll to completion ----------
+# Caldera's atomic planner is sequential and beacons every sleep_max
+# seconds (default 60s). For our 17-ability profile that's roughly
+# 17min worst case if every beacon picks up the next ability. Cap at
+# 30min so a single slow ability doesn't stall the whole run.
 echo
-echo "── polling operation state (max 10 min) ──────"
-for i in $(seq 1 120); do
+echo "── polling operation state (max 30 min) ──────"
+for i in $(seq 1 360); do
     STATE=$(curl -sf -H "KEY: $CALDERA_KEY" \
         "$CALDERA/api/v2/operations/$OPERATION_ID" \
         | python3 -c "import json,sys; print(json.load(sys.stdin).get('state',''))" 2>/dev/null \
@@ -145,8 +166,8 @@ for i in $(seq 1 120); do
         echo "  ✓ operation finished after ~$((i*5))s"
         break
     fi
-    if [ $((i % 6)) -eq 0 ]; then
-        echo "  · state=$STATE (${i}/120 polls, ~$((i*5))s elapsed)"
+    if [ $((i % 12)) -eq 0 ]; then
+        echo "  · state=$STATE (${i}/360 polls, ~$((i*5))s elapsed)"
     fi
     sleep 5
 done
@@ -157,20 +178,31 @@ fi
 # ---------- pull report + detections ----------
 echo
 echo "── collecting outputs ────────────────────────"
-REPORT="/tmp/caldera-op-$OPERATION_ID.json"
-DETECTIONS="/tmp/cybercat-detections-$OPERATION_ID.json"
+REPORT="$RUN_TMP/caldera-op-$OPERATION_ID.json"
+DETECTIONS="$RUN_TMP/cybercat-detections-$OPERATION_ID.json"
+REPORT_C="$RUN_TMP_IN_CONTAINER/caldera-op-$OPERATION_ID.json"
+DETECTIONS_C="$RUN_TMP_IN_CONTAINER/cybercat-detections-$OPERATION_ID.json"
 
-curl -sf -H "KEY: $CALDERA_KEY" \
+# Caldera 4.2.0's /api/v2/operations/<id>/report is POST-only with an
+# empty JSON body. (5.x exposes GET on the same path.)
+curl -sf -X POST -H "KEY: $CALDERA_KEY" \
+    -H "Content-Type: application/json" -d '{}' \
     "$CALDERA/api/v2/operations/$OPERATION_ID/report" > "$REPORT"
+# URL-encode the '+' in the timezone offset so FastAPI sees +00:00, not
+# a space. Use %2B explicitly for the leading + only.
+RUN_START_URL="${RUN_START/+/%2B}"
+# /v1/detections caps `limit` at 200 (validated server-side); curl -sf
+# would silently swallow a 422. We don't expect anywhere near 200
+# detections per run, so 200 is fine.
 curl -sf -H "Authorization: Bearer $TOKEN" \
-    "$API/v1/detections?since=$RUN_START&limit=500" > "$DETECTIONS"
+    "$API/v1/detections?since=$RUN_START_URL&limit=200" > "$DETECTIONS"
 echo "  ✓ caldera report → $REPORT"
 echo "  ✓ cybercat detections → $DETECTIONS"
 
 # ---------- score ----------
 if [ "$NO_SCORE" -eq 1 ]; then
     echo
-    echo "(--no-score: skipping scorer; outputs left at /tmp/caldera-op-*.json)"
+    echo "(--no-score: skipping scorer; outputs left at $RUN_TMP/caldera-op-*.json)"
     echo "  RUN_START=$RUN_START"
     echo "  OPERATION_ID=$OPERATION_ID"
     exit 0
@@ -184,14 +216,18 @@ fi
 
 echo
 echo "── scoring ───────────────────────────────────"
+# Double-leading-slash on the in-container Linux paths so Git Bash on
+# Windows leaves them alone (it interprets //foo as a literal /foo
+# whereas /foo gets converted to a Windows form). The backend container
+# treats // as / so this is transparent on Linux.
 docker compose -f "$COMPOSE_FILE" exec -T backend \
     python -m labs.caldera.scorer \
-        --expectations "/app/labs/caldera/$(basename "$EXPECTATIONS_FILE")" \
-        --caldera-report "$REPORT" \
-        --detections "$DETECTIONS" \
+        --expectations "//app/labs/caldera/$(basename "$EXPECTATIONS_FILE")" \
+        --caldera-report "/${REPORT_C}" \
+        --detections "/${DETECTIONS_C}" \
         --operation-id "$OPERATION_ID" \
-        --out-md "/app/docs/phase-21-scorecard.md" \
-        --out-json "/app/docs/phase-21-scorecard.json"
+        --out-md "//app/docs/phase-21-scorecard.md" \
+        --out-json "//app/docs/phase-21-scorecard.json"
 
 echo
 echo "Scorecard written to docs/phase-21-scorecard.{md,json}."

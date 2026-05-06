@@ -54,16 +54,37 @@ def score(
     for d in detections:
         rules_fired.setdefault(d.get("rule_id", "?"), []).append(d)
 
-    # Caldera's operation report shape: { 'steps': { agent_paw: [
-    #   {ability_id, status, output, ...}, ... ] } }. Flatten.
+    # Caldera's operation report shape varies across major versions.
+    # 5.x: report.steps = { paw: [ {ability_id, status, ...}, ... ] }.
+    # 4.2.0: report.steps = { paw: { "steps": [ {ability_id, status, ...} ] } }
+    #        report.host_group = [ {paw, links: [ {ability: {...}, ...} ] } ]
+    # Try all three layouts, flatten into a uniform `ran` dict keyed
+    # by ability_id.
     ran: dict[str, dict] = {}
     steps_obj = caldera_report.get("steps") or {}
     if isinstance(steps_obj, dict):
         for agent_steps in steps_obj.values():
+            # 4.2.0 wraps the per-agent step list inside another dict.
+            if isinstance(agent_steps, dict):
+                agent_steps = agent_steps.get("steps") or []
             for step in agent_steps or []:
+                if not isinstance(step, dict):
+                    continue
                 aid = step.get("ability_id")
                 if aid:
                     ran[aid] = step
+    for hg in caldera_report.get("host_group") or []:
+        if not isinstance(hg, dict):
+            continue
+        for link in hg.get("links") or []:
+            if not isinstance(link, dict):
+                continue
+            ability = link.get("ability") or {}
+            aid = ability.get("ability_id") or link.get("ability_id")
+            if aid:
+                # Flatten ability metadata onto the link so downstream
+                # `step.get("status")` / `step.get("output")` keep working.
+                ran[aid] = {**link, "ability_id": aid}
 
     rows: list[dict] = []
     for ab in expectations.get("abilities", []):

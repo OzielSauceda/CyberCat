@@ -57,7 +57,14 @@ services:
       - ./wazuh-config/config/wazuh_indexer_ssl_certs/root-ca.pem:/etc/ssl/certs/wazuh-ca.pem:ro
       # Phase 19: bind-mount detection-as-code fixtures so backend tests can
       # reach them at /app/labs/fixtures regardless of build context.
-      - ../../labs:/app/labs:ro
+      # Phase 21: read-write so `python -m labs.caldera.build_operation_request
+      # --resolve-uuids` can write *.resolved.yml sidecars next to the
+      # source profile/expectations on first run.
+      - ../../labs:/app/labs
+      # Phase 21: bind-mount docs/ so the scorer can write
+      # phase-21-scorecard.{md,json} to the host repo where the
+      # operator (and `git diff`) can see it.
+      - ../../docs:/app/docs
     depends_on:
       postgres:
         condition: service_healthy
@@ -257,7 +264,14 @@ services:
     volumes:
       - caldera_data:/usr/src/app/data
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:8888/api/v2/health || exit 1"]
+      # Caldera 4.2.0 has no /api/v2/health endpoint (that's 5.x). /enter
+      # is a public route that 302-redirects unauthenticated requests to
+      # /login; curl -sf accepts a 302 (only 4xx/5xx fail). Override the
+      # Host header to a name without ":port" because Caldera 4.2.0 +
+      # yarl 1.9.4 (pinned in infra/caldera/Dockerfile) is healthy on
+      # host:port traffic, but defending in depth — `Host: caldera`
+      # always works and matches the compose service name.
+      test: ["CMD-SHELL", "curl -sf -H 'Host: caldera' http://127.0.0.1:8888/enter || exit 1"]
       interval: 15s
       timeout: 10s
       retries: 20

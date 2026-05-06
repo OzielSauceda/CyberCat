@@ -1,0 +1,122 @@
+profile_name: cybercat-phase21-linux-baseline
+abilities:
+- id: c0da588f-79f0-4263-8998-7496b1a40596
+  name: identify active user (id / whoami)
+  technique: T1059.004
+  expected_rule_id: GAP
+  status: gap
+  notes: "Linux sh exec \u2014 process_suspicious_child is Windows-only (Gap 1)."
+- id: 3b5db901-2cb8-4df7-8043-c4628a6a5d5a
+  name: process listing (find user processes)
+  technique: T1057
+  expected_rule_id: GAP
+  status: gap
+  notes: "No process-discovery detector exists \u2014 Phase 22 input."
+- id: 638fb6bb-ba39-4285-93d1-7e4775b033a8
+  name: network connection enumeration
+  technique: T1018
+  expected_rule_id: GAP
+  status: gap
+  notes: "No remote-system-discovery detector \u2014 Phase 22 input."
+- id: 13c2fcf67b344d42cd9dca8b9a310cdc
+  name: /etc/passwd read (local)
+  technique: T1003.008
+  expected_rule_id: GAP
+  status: gap
+  notes: "Credential-discovery file read undetected \u2014 Phase 22 input."
+- id: 90c2efaa-8205-480d-8bb6-61d90dbaf81b
+  name: filesystem enumeration (find files)
+  technique: T1083
+  expected_rule_id: GAP
+  status: gap
+  notes: "No file-discovery detector \u2014 Phase 22 input."
+- id: linux_lateral_ssh
+  name: "SSH lateral pivot (sshd \u2192 bash \u2192 ssh)"
+  technique: T1021.004
+  expected_rule_id: GAP
+  status: gap
+  notes: Linux process-chain undetected (Gap 1, A1 evidence).
+- id: linux_curl_pipe_sh
+  name: curl | sh persistence
+  technique: T1105
+  expected_rule_id: GAP
+  status: gap
+  notes: Download-and-execute pattern undetected (Gap 1, A1+A2 evidence).
+- id: e05bc86fbf7221f09ec13113f1292a15
+  name: SUDO brute-force
+  technique: T1110.001
+  expected_rule_id: py.auth.failed_burst
+  status: covered
+  notes: 'Match to backend/app/detection/rules/auth_failed_burst.py.
+
+    Threshold: 4 failures within 60s windowed by user. Stockpile''s
+
+    sudo-brute-force-debian repeatedly invokes `sudo` with bad
+
+    passwords; sshd/PAM logs the failures the same way ssh login
+
+    failures are logged.
+
+    '
+- id: linux_creds_aws_read
+  name: clean cred-theft + AWS creds read + login from new IP
+  technique: T1078
+  expected_rule_id: GAP
+  status: gap
+  notes: 'Reads /home/realuser/.aws/credentials, exfils via curl, then logs
+
+    in cleanly from a brand-new IP. No preceding failures, so
+
+    auth_anomalous_source_success stays silent (Gap 3). Phase 22
+
+    candidate: auth_baseline_unknown_source_success.
+
+    '
+- id: linux_file_burst_encrypt
+  name: "file-burst rename (30\xD7 .encrypted in 60s)"
+  technique: T1486
+  expected_rule_id: GAP
+  status: gap
+  notes: No file-creation rate detector exists (Gap 4, A4 evidence).
+- id: linux_useradd_persist
+  name: useradd backdoor account
+  technique: T1098
+  expected_rule_id: GAP
+  status: gap
+  notes: "No account-manipulation detector \u2014 Phase 22 input."
+- id: 0e5730f670555b9dba829f3d90cbd445
+  name: password change (passwd)
+  technique: T1098
+  expected_rule_id: GAP
+  status: gap
+  notes: "Same category as useradd \u2014 account manipulation undetected."
+- id: da912f911c137cb52199c830f00a0da5
+  name: cron persistence (/etc/cron.d/...)
+  technique: T1546.003
+  expected_rule_id: GAP
+  status: gap
+  notes: "No persistence detector \u2014 Phase 22 input."
+- id: 3f465c72d351789eda3a553334fa43f3
+  name: bash history wipe
+  technique: T1070.003
+  expected_rule_id: GAP
+  status: gap
+  notes: "No indicator-removal detector \u2014 Phase 22 input."
+- id: b87adfc0c92e77845da477f44a4d1944
+  name: tarball stage (data compressed)
+  technique: T1560.001
+  expected_rule_id: GAP
+  status: gap
+  notes: Staging-archive pattern undetected (A4 evidence).
+- id: 6cbeb1957c44509a939fa6828fce66b6
+  name: scp exfil (push)
+  technique: T1048.002
+  expected_rule_id: GAP
+  status: gap
+  notes: "No alt-protocol exfil detector \u2014 Phase 22 input."
+- id: 5cf8270fb03a94b5ad786032a625b1ac
+  name: systemd persistence (write .service file)
+  technique: T1543.002
+  expected_rule_id: GAP
+  status: gap
+  notes: "No systemd-unit detector \u2014 Phase 22 input."

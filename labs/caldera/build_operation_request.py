@@ -332,20 +332,46 @@ def build_payload(here: Path, caldera_url: str, key: str, group: str) -> int:
             )
             return 1
 
-    # Idempotent adversary upsert: search by name first.
+    # Idempotent adversary upsert: search by name. If an adversary with
+    # the same name exists but its atomic_ordering doesn't match what
+    # we're about to send (a previous resolve produced a different list,
+    # or content drifted between runs), delete and recreate so the
+    # operation runs against the current profile, not a stale snapshot.
     name = profile["name"]
+    desired_ordering = list(profile["atomic_ordering"])
     adv_list = _caldera_get(f"{caldera_url}/api/v2/adversaries", key)
     assert isinstance(adv_list, list)
     adv_id = None
     for adv in adv_list:
         if isinstance(adv, dict) and adv.get("name") == name:
-            adv_id = adv.get("adversary_id")
+            existing_ordering = list(adv.get("atomic_ordering") or [])
+            if existing_ordering == desired_ordering:
+                adv_id = adv.get("adversary_id")
+            else:
+                # Stale adversary — delete so we can recreate.
+                stale_id = adv.get("adversary_id")
+                if stale_id:
+                    print(
+                        f"adversary {name!r} ({stale_id}) has stale atomic_ordering "
+                        f"({len(existing_ordering)} entries vs {len(desired_ordering)} desired); "
+                        f"deleting and recreating.",
+                        file=sys.stderr,
+                    )
+                    del_req = urllib.request.Request(
+                        f"{caldera_url}/api/v2/adversaries/{stale_id}",
+                        headers={"KEY": key},
+                        method="DELETE",
+                    )
+                    try:
+                        urllib.request.urlopen(del_req, timeout=10).read()
+                    except Exception as e:
+                        print(f"  warning: delete failed: {e}", file=sys.stderr)
             break
     if not adv_id:
         body = {
             "name": name,
             "description": profile.get("description", ""),
-            "atomic_ordering": profile["atomic_ordering"],
+            "atomic_ordering": desired_ordering,
         }
         created = _caldera_post(f"{caldera_url}/api/v2/adversaries", key, body)
         assert isinstance(created, dict)
@@ -355,10 +381,13 @@ def build_payload(here: Path, caldera_url: str, key: str, group: str) -> int:
     # for a coverage scorecard).
     planners = _caldera_get(f"{caldera_url}/api/v2/planners", key)
     assert isinstance(planners, list)
+    # Caldera 4.2.0 returns `id` for the planner GUID; 5.x uses
+    # `planner_id`. Accept either so the script is portable across
+    # major-version pins.
     planner_id = None
     for pl in planners:
         if isinstance(pl, dict) and pl.get("name") == "atomic":
-            planner_id = pl.get("planner_id")
+            planner_id = pl.get("planner_id") or pl.get("id")
             break
     if not planner_id:
         print("could not find 'atomic' planner in Caldera /api/v2/planners.", file=sys.stderr)
@@ -376,10 +405,14 @@ def build_payload(here: Path, caldera_url: str, key: str, group: str) -> int:
         )
         return 3
 
+    # Caldera 4.2.0's PlannerSchema declares planner_id with
+    # data_key='id', so the *wire* key is `id`. AdversarySchema accepts
+    # both adversary_id and id (it has a pre_load fix_id hook). Send
+    # `id` for planner; keep adversary_id for adversary.
     payload = {
         "name": f"{name} run",
         "adversary": {"adversary_id": adv_id},
-        "planner": {"planner_id": planner_id},
+        "planner": {"id": planner_id},
         "source": {"name": "basic"},  # default fact source ships with stockpile
         "auto_close": True,
         "state": "running",

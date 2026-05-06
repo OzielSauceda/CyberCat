@@ -89,6 +89,10 @@ Each entry follows the same shape:
 - [Plain-language summary layer](#plain-language-summary-layer)
 - [Recommendation engine (two-level mapping)](#recommendation-engine-two-level-mapping)
 - [Fetch-on-start agent enrollment](#fetch-on-start-agent-enrollment)
+- [Transitive dependency version drift](#transitive-dependency-version-drift)
+- [Caldera atomic planner — facts, fact sources, deadman links](#caldera-atomic-planner--facts-fact-sources-deadman-links)
+- [Git Bash MSYS path translation](#git-bash-msys-path-translation)
+- [PAM authentication failure surface (sshd vs sudo vs su)](#pam-authentication-failure-surface-sshd-vs-sudo-vs-su)
 
 ### Verification
 - [Smoke tests vs unit tests vs integration tests](#smoke-tests-vs-unit-tests-vs-integration-tests)
@@ -4020,6 +4024,145 @@ The methodology is pluggable: replace Caldera with any other emulation engine th
 **Tradeoffs:** The enum is opinionated — `unexpected-hit` could be split into "unexpected-but-correct" and "unexpected-and-wrong" if we had the human review bandwidth. We don't, so we collapse to one bucket and rely on the operator to read the row notes for context. The "ability-skipped" bucket is mostly noise (UUID resolution issues) but keeping it surfaces silently-broken UUIDs that would otherwise look like gaps.
 
 **Related entries:** [MITRE Caldera adversary emulation](#mitre-caldera-adversary-emulation) · [ATT&CK technique attribution (set-overlap rule)](#attck-technique-attribution-set-overlap-rule) · [Smoke tests vs unit tests vs integration tests](#smoke-tests-vs-unit-tests-vs-integration-tests) · [Pre-Phase-22 measurement vs guess](#pre-phase-22-measurement-vs-guess)
+
+---
+
+## Transitive dependency version drift
+*Introduced: Phase 21 (Day-2)* · *Category: Project Pattern*
+
+**Intuition:** When a library you depend on declares only a *lower bound* on its own deps (`websockets>=10.3`), pip is free to resolve to whatever is latest at install time. If those deps later change their API in incompatible ways, your code breaks not because *you* changed anything but because *the resolver* picked up new versions. The fix is upper-bound pins on transitive deps that have known API drift.
+
+**Precise:** Python's pip resolver picks the highest version satisfying the constraint set. A pin like `websockets>=10.3` (no upper bound) means "10.3 or any version after"; if the project hasn't been touched in two years, today's pip will pull `websockets-16.x` even though the project was tested against `10.x`. SemVer says major-version bumps signal breaking API changes — but most Python libraries don't follow SemVer strictly, and even when they do, the user code might reach into private internals that change in any release. The defensive move: when the upstream's pins are loose, *we* add upper bounds in our Dockerfile (`pip install ... 'websockets<14' 'yarl<1.10'`) so reproducible builds stay reproducible.
+
+**How it played out in Phase 21 (the case study):**
+
+Caldera 4.2.0's `requirements.txt` has `websockets>=10.3` (lower bound only) and an unbounded transitive `yarl` (a sub-dependency of `aiohttp`, the HTTP framework Caldera builds on). Today's pip resolved both to their latest:
+- `websockets-16.0` rewrote the server connection API in 14.0; Caldera's internal `/system/ready` probe got `1011 internal error` on every startup.
+- `yarl-1.23.0` added strict host-string validation in `_encode_host`. Any `:` in a host string is rejected. **But `aiohttp 3.8.4` still passes `request.host` (the raw `Host` header — which legitimately contains `:port` for non-default ports like `localhost:8888`) directly to `URL.build(host=...)`.** Result: every HTTP request to Caldera with a port in the Host header raised `ValueError` mid-route-resolve, aiohttp returned a generic 500 with no body, and the operator had no way to know what failed because Caldera's `setup_logger()` muted everything except `aiohttp.server` and `asyncio`.
+
+The diagnostic technique was straight from CLAUDE.md §9 "debugging as a teaching surface":
+1. **Symptom:** every HTTP route returns 500 with the body `Server got itself in trouble` (which I recognized as Python stdlib `http.server`'s default 500 message, not aiohttp's — first hint that something weird was layered).
+2. **Hypothesis A:** auth middleware broken. Tested by curl-ing `/enter` (a public route) → still 500. Ruled out.
+3. **Hypothesis B:** WebSocket startup error poisoning the app. Pinned `websockets<14`. Still 500. Ruled out (but the pin was correct for a separate reason — the `1011 internal error` startup noise went away).
+4. **Hypothesis C:** something about the request shape. Tested raw socket: `Host: localhost` → 302 (works), `Host: localhost:8888` → 500. *That* was the clue. The trigger was the `:port`.
+5. **Resolution:** disabled Caldera's logger silencing (sed-patched `setup_logger`), reproduced the bad request, captured the `ValueError: Host 'localhost:8888' cannot contain ':'` traceback. Pinned `yarl<1.10`.
+
+**Why it exists:** This is the classic cost of pip's "permissive by default" resolution policy. Other ecosystems make the opposite choice: Cargo (Rust) requires you to specify an exact version *family*, and `Cargo.lock` records the resolved tree so two `cargo build` calls produce byte-identical binaries. Python has `pip-compile` / `Poetry` / `uv` that emulate this, but a great deal of the ecosystem still ships `requirements.txt` with lower bounds only, and the burden falls on downstream consumers to add upper bounds where API drift has bitten them.
+
+**Where in CyberCat:** `infra/caldera/Dockerfile` carries the four pins (Caldera 4.2.0, websockets<14, yarl<1.10, python:3.11-slim-bookworm) with rationale comments inline. The pin set is documented again in `docs/decisions/ADR-0016-caldera-emulation.md` "Day-2 amendments" §B.
+
+**Where else you'll see it:** This is *the* universal Python build-reproducibility pain. Common examples: `urllib3` (used by `requests` — major versions break TLS handling), `cryptography` (Fernet API moves between versions), `pydantic` (v1 → v2 was famously breaking), `sqlalchemy` (1.x → 2.x async API rewrite). Outside Python: NPM's `package.json` `^` ranges have the same semantic; many projects pin `"react": "18.2.0"` exactly to avoid `^18.x` resolving to a future minor that breaks something.
+
+**Tradeoffs:** Pinning transitive deps tightly means manually bumping them when you DO want a new version (security fixes, performance improvements). The alternative — letting pip resolve fresh every build — means "today's image works, tomorrow's might not." For Phase 21's purpose (reproducible scorecard runs), tight pinning wins. For a fast-moving CI/CD environment, periodic dep-bump PRs with explicit testing is the better tradeoff.
+
+**Related entries:** [MITRE Caldera adversary emulation](#mitre-caldera-adversary-emulation) · [Docker Compose profiles](#docker-compose-profiles)
+
+---
+
+## Caldera atomic planner — facts, fact sources, deadman links
+*Introduced: Phase 21 (Day-2)* · *Category: Detection*
+
+**Intuition:** Caldera's "atomic planner" is the simplest of its planners — go through your ability list in order, run each on the agent, move on. But Caldera abilities aren't pure shell commands; they're parameterized templates. A `find` ability says "run `find / -name '*.#{file.sensitive.extension}'`" — Caldera substitutes the placeholder from a *fact source* before dispatching. If the fact source doesn't have that fact, the planner skips the ability silently. After every ability, the planner also fires a *deadman link* — a cleanup command — and if that runs before the ability's effects are observable (e.g. before 4 brute-force failures land in `auth.log`), you don't get the detection signal.
+
+**Precise:** Caldera's **atomic planner** iterates `adversary.atomic_ordering` left-to-right. For each ability, it evaluates the ability's `requires` block: a list of fact slots like `host.user.name` or `file.sensitive.extension`. Facts come from a **source** — a YAML doc (or a `POST /api/v2/sources` payload) listing `name: value` pairs. The default source `basic` ships empty. If a required fact is missing, the planner moves on to the next ability without dispatching. If facts are present, the placeholders `#{fact.name}` in the ability's `command` field are substituted and the resulting shell command is sent to Sandcat. After Sandcat reports success, the planner additionally sends a **deadman link** — a cleanup command from the ability's `cleanup` block — which runs even if the ability errors. With `auto_close: true` on the operation, the planner moves to state `finished` once the queue is empty.
+
+**How it works (under the hood):**
+
+The dispatch loop on each agent's beacon (default ~3s):
+1. Planner reads `adversary.atomic_ordering[i]` for next-unrun ability.
+2. Looks up the ability's `requires` block. Calls into the fact-source service to fill placeholders.
+3. If any fact is missing → skip this ability, advance `i`, return immediately to the agent.
+4. If all facts present → substitute, send the rendered command. Wait for Sandcat to return result on next beacon.
+5. After the result, fire the deadman cleanup command. Sandcat runs it on the next pulse.
+6. Loop until `i == len(atomic_ordering)`. Operation flips to `state: finished`.
+
+The **deadman race** is what bit Phase 21's first run. Stockpile's `SUDO Brute Force - Debian` ability does roughly:
+- `useradd ... art && su -c "<wrong-password loop>" art` (the brute-force part).
+- Cleanup: `userdel art; rm -rf /home/art`.
+
+The brute-force loop tries 5–10 wrong passwords serially over a few seconds. PAM logs each failure to `/var/log/auth.log`. CyberCat's `cct-agent` tails that file and posts events with a small batching delay. The detector `auth_failed_burst.py` has a 60-second window and a 4-failure threshold. **Timeline that races:** brute-force loop completes in ~2s (4–5 failures land in auth.log) → planner fires deadman cleanup → `userdel art` removes the user → cct-agent has just batched the events and is about to POST → detector fires → CyberCat normalizes the events, but by now the operation is `finished` and the run.sh detection-window has closed (`since=$RUN_START`, `now()` is moments ahead of when run.sh re-fetches the detections). Result: the detector might fire (or might not, depending on batch timing) but the scorer's "detections during the window" join doesn't pick it up.
+
+**Why it exists:** Caldera's design optimizes for *ability isolation* — each ability cleans up after itself so subsequent abilities run against a known state. Without strict cleanup, `lab-debian` accumulates artifacts (extra users, stray files, modified configs) and the scorecard becomes irreproducible. The deadman link is the enforcement mechanism. The cost is the time-window race we hit: detection events generated *during* the ability haven't fully propagated to the SIEM by the time the cleanup fires.
+
+**Where in CyberCat:** Atomic planner is selected at operation creation in `labs/caldera/build_operation_request.py:382` (`"planner": {"id": planner_id}`). Fact source is `"source": {"name": "basic"}` — empty by default. **Phase 21.5 will add:** a `labs/caldera/fact_source.yml` registered via `POST /api/v2/sources` with realistic lab values (`host.user.name=realuser`, `file.sensitive.extension=pdf`), and an investigation of whether to disable cleanup for time-window abilities or pick brute-force variants whose cleanup doesn't race.
+
+**Where else you'll see it:** Atomic Red Team's `.yaml` invocations have the same fact-substitution pattern (`{{prerequisites}}`, `{{cleanup}}`). Ansible's `roles` are conceptually similar — declarative tasks with input variables, run in order, with handlers for cleanup. Make/Bazel/Nix all have build-time variable substitution. The deadman concept exists in Kubernetes Pod terminationGracePeriod (the cleanup window before forced kill).
+
+**Tradeoffs:** Strict cleanup = clean state between abilities = race-prone for time-window detectors. Relaxed cleanup = drift accumulates over a 17-ability operation. The right call depends on the detector class: state-based detectors (a user exists / a file exists) need cleanup; time-window detectors (4-failures-in-60s) need cleanup *deferred*. Caldera doesn't expose a per-ability cleanup-delay knob; Phase 21.5 will likely fork the brute-force ability to add one.
+
+**Related entries:** [MITRE Caldera adversary emulation](#mitre-caldera-adversary-emulation) · [Coverage scorecard methodology](#coverage-scorecard-methodology) · [Fetch-on-start agent enrollment](#fetch-on-start-agent-enrollment)
+
+---
+
+## Git Bash MSYS path translation
+*Introduced: Phase 21 (Day-2)* · *Category: Project Pattern*
+
+**Intuition:** Git Bash on Windows runs Bash but it's a UNIX simulation layered on a Windows kernel. When you pass a Linux-style path like `/tmp/foo` to a Windows executable (`docker.exe`, Python's `python.exe`), Git Bash secretly rewrites the path to `C:\Users\...` first. Most of the time this is helpful. Sometimes it's catastrophic — your in-container `/app/labs/...` argument gets rewritten to `C:\Program Files\Git\app\labs\...` which doesn't exist. The fix: prefix the path with `//` (double slash) and Git Bash leaves it alone.
+
+**Precise:** Git Bash bundles MSYS2 (the runtime) and Cygwin-derived tools. By default, MSYS rewrites Linux-style paths to Windows-native form when invoking *non-MSYS* binaries (the heuristic checks the executable's PE header). Specifically, an argument starting with `/x/...` (where `x` is a single letter) gets rewritten to `X:\...`; an argument starting with `/foo` (multiple chars) gets translated by appending to the MSYS root (typically `C:\Program Files\Git`). The translation is opt-out via two mechanisms:
+- Per-command: `MSYS_NO_PATHCONV=1 some-command /linux/path` disables translation for that invocation.
+- Per-argument: prefixing with `//` (two leading slashes) tells MSYS this is a literal Linux path (not a host filesystem reference) and to leave it alone. Linux kernel collapses `//foo` to `/foo` so the receiving end sees the right path.
+
+**How it played out in Phase 21 (the case study):**
+
+Five separate path-translation traps in `labs/caldera/run.sh`:
+
+1. **`mktemp -t caldera-op-XXXXXX.json`** produces `/tmp/caldera-op-aBcDeF.json` (Bash form). Python on Windows can't open `/tmp/foo` (no such drive). Fix: use a project-local scratch dir `$REPO_ROOT/labs/caldera/.tmp/` instead of `/tmp`.
+2. **`docker compose -f "$COMPOSE_FILE"` with MSYS_NO_PATHCONV=1 prefix** mangled the compose-file path itself. The env var was applied too aggressively — both args got "preserved as Bash-form" and `docker.exe` (a Windows binary) couldn't open `/c/Users/oziel/...`. Fix: don't use `MSYS_NO_PATHCONV` here; let the compose-file path be translated normally.
+3. **`docker exec ... python -m scorer --out-md /app/docs/scorecard.md`** — the in-container path `/app/docs/scorecard.md` got rewritten to `C:/Program Files/Git/app/docs/scorecard.md` because Git Bash assumed it was a host filesystem ref. Fix: use `//app/docs/scorecard.md` (double slash). Linux kernel collapses to `/app/docs/scorecard.md` inside the container.
+4. **`docker compose ... exec lab-debian grep "..." /var/log/sandcat.log`** — same trap. The smoke test's T2 silently failed because the grep target got rewritten to `C:/Program Files/Git/var/log/sandcat.log`. Fix: `//var/log/sandcat.log`.
+5. **Python `open('$BASH_VAR')` where $BASH_VAR is a path** — even when the path *was* successfully resolved to Windows form by Bash, Python's open() sometimes interpreted Bash-form `/c/Users/...` as `C:/c/Users/...` (extra letter). Fix: pipe data through stdin instead of file-opening across the language boundary, e.g. `python3 -c "import json,sys; print(json.load(sys.stdin)['id'])" < "$VAR"`.
+
+**Why it exists:** MSYS path translation is a productivity feature for the common case — Windows users who type Bash commands wanting to invoke Windows binaries on host files. It became a sharp edge when we started orchestrating Linux containers from Bash on Windows (Docker on Windows is a Linux VM accessed via a Windows control plane), because the path semantics double-flip. The fix patterns above are well-known in the Git-Bash + Docker community but you discover them one bug at a time.
+
+**Where in CyberCat:** `labs/caldera/run.sh` uses `//app/...` for in-container paths and a project-local `$RUN_TMP="$SCRIPT_DIR/.tmp"` for host-Bash paths. `labs/smoke_test_phase21.sh` T2 uses `//var/log/sandcat.log`. The pattern is documented in `docs/runbook.md` "Phase 21 gotchas" section.
+
+**Where else you'll see it:** The same trap exists in WSL2 ↔ Windows file sharing (`/mnt/c/...` is the WSL view of the Windows filesystem; native Linux paths inside the WSL distro are different). In Docker Desktop's bind mount specs, Windows-style paths (`C:\Users\foo`) get auto-translated to Linux-style for the container. Cygwin (Git Bash's parent) has the same behavior. PowerShell's path handling is a separate world entirely (no slash translation).
+
+**Tradeoffs:** Disabling translation per-command (`MSYS_NO_PATHCONV=1`) is too aggressive — it breaks paths that *should* be translated. The double-slash trick is per-argument and surgically correct, but cosmetically ugly (`//app/...` looks wrong). The ugliness is the tax for portability. Alternative: switch to PowerShell entirely (no slash translation), but then we lose Bash idioms like `$()` and `$(...)`.
+
+**Related entries:** [Bash sourcing & shared shell libraries](#bash-sourcing--shared-shell-libraries) · [Docker Compose profiles](#docker-compose-profiles)
+
+---
+
+## PAM authentication failure surface (sshd vs sudo vs su)
+*Introduced: Phase 21 (Day-2)* · *Category: Telemetry sources*
+
+**Intuition:** On Linux, `ssh`, `sudo`, and `su` all check passwords through the same module — PAM. PAM writes a failure event to `/var/log/auth.log` regardless of which command initiated the check. But the events look slightly different — different syslog tag, different `authentication failure` line shape — and a detector that keys on the *tag* (e.g. only on `sshd:`) will miss failures from sudo or su. The fix: key on PAM's universal `authentication failure` substring, not on the surface program.
+
+**Precise:** PAM (Pluggable Authentication Modules) is the Linux subsystem that programs call to verify credentials. `pam_authenticate()` is the entry point; it consults config in `/etc/pam.d/<service>` (e.g. `/etc/pam.d/sshd`, `/etc/pam.d/sudo`) and returns `PAM_SUCCESS` or a failure code. Every PAM module, including the common-auth chain, logs to syslog with the *calling program's* identifier as the tag (`sshd`, `sudo`, `su`, `login`). Failed auths produce a syslog line containing the substring `authentication failure` plus structured key=value fields:
+- `rhost=<source-ip>` (sshd-only — set by sshd from the TCP peer)
+- `user=<target-username>` (always)
+- `tty=<tty>` (sudo, su, login)
+- `ruser=<requesting-user>` (sudo: who's trying to escalate)
+
+**How the surfaces differ:**
+
+```
+# sshd failure (CyberCat's covered case):
+Apr 30 04:23:17 lab-debian sshd[1234]: pam_unix(sshd:auth): authentication failure;
+  logname= uid=0 euid=0 tty=ssh ruser= rhost=10.0.0.42 user=alice
+
+# sudo failure (Phase 21's miss):
+Apr 30 04:24:01 lab-debian sudo[5678]: pam_unix(sudo:auth): authentication failure;
+  logname=art uid=1001 euid=0 tty=/dev/pts/0 ruser=art rhost=  user=art
+
+# su failure (similar):
+Apr 30 04:24:09 lab-debian su[5680]: pam_unix(su:auth): authentication failure;
+  logname=art uid=1001 euid=0 tty=/dev/pts/0 ruser=art rhost=  user=art
+```
+
+CyberCat's `auth_failed_burst.py` detector keys on `sshd[<pid>]:` as the syslog tag and extracts `rhost=` to bucket failures by source IP. Sudo failures don't have `sshd[...]:` and don't have an `rhost=` (they're local) — the detector skips them entirely. Phase 21's Caldera-driven `SUDO Brute Force - Debian` ability generated 5+ sudo PAM failures within seconds, but our detector saw zero of them.
+
+**Why it exists:** sshd's syslog tag is the natural key for "external SSH brute force" detection — that was Phase 14's original use case. The detector was scoped to that surface and tested against scenarios that all used sshd. The narrowness was invisible until Phase 21's Caldera profile chose a sudo-source brute-force ability instead, which is just as much a brute-force technique (T1110.001) but produces a different syslog shape. PAM is the universal substrate; keying on it instead of the surface program is the better detector design.
+
+**Where in CyberCat:** `backend/app/detection/rules/auth_failed_burst.py` (current narrow sshd-keyed detector) → Phase 22 will broaden it. The cct-agent already tails `/var/log/auth.log` and parses sshd lines; expanding the parser to recognize sudo/su/login PAM lines is the cct-agent-side work item.
+
+**Where else you'll see it:** Every Linux SIEM detector for "brute force" needs to make this decision. Splunk's CIM `Authentication` data model abstracts the source program away (`app=sshd` is a field, not a primary key). Wazuh's auth rules have separate decoder chains for sshd / sudo / su but a unified detection rule (`Multiple authentication failures`) that fires on any of them. CrowdStrike's ATT&CK content for T1110 covers both surfaces. AIX, Solaris, and BSDs use the same PAM model and the same fix applies.
+
+**Tradeoffs:** Broadening the detector raises false-positive risk — PAM failures from cron's `pam_unix(cron:account):` (a benign reload condition) or from one-off `sudo` mistakes by the operator are not attacks. Phase 22's broadening will need a *source-aware threshold* — sshd brute force is "≥4 failures in 60s from one rhost"; sudo brute force should be "≥4 failures in 60s for one ruser regardless of source." Different keys, same threshold shape.
+
+**Related entries:** [sshd auth events](#sshd-auth-events) · [auditd (EXECVE / SYSCALL / EOE)](#auditd-execve--syscall--eoe) · [Coverage scorecard methodology](#coverage-scorecard-methodology) · [MITRE Caldera adversary emulation](#mitre-caldera-adversary-emulation)
 
 ---
 
