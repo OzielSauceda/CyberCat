@@ -1,52 +1,34 @@
 #!/usr/bin/env bash
 # labs/chaos/scenarios/kill_redis.sh
 #
-# Phase 19.5 scenario A1: kill Redis mid-load. Verifies that `safe_redis()`
-# (backend/app/db/redis_state.py) and `EventBus._supervisor()`
-# (backend/app/streaming/bus.py:97-123) keep the ingest path alive when
-# Redis dies abruptly and stays dead for ~15s before being restored.
+# Scenario A1 — Kill Redis mid-simulator-run.
 #
-# Test recipe:
-#   1. Pre-flight: backend reachable.
-#   2. Run load_harness.py at 100/s × 30s (inside backend container so we
-#      don't depend on host httpx — matches A2/A6 pattern).
-#   3. At t=10s: `docker compose kill redis` (SIGKILL — abrupt, no SIGTERM
-#      grace window; that's the worst case we're testing).
-#   4. At t=25s: `docker compose up -d redis` (restore).
-#   5. Wait for harness to finish at t=30s.
-#   6. Evaluate four §A1 acceptance counters.
+# What it tests:
+#   Kills the Redis container ~4 s into a simulator run, holds it dead for
+#   25 s, then restores it. Verifies that safe_redis()
+#   (backend/app/db/redis_state.py) and EventBus._supervisor()
+#   (backend/app/streaming/bus.py:97-123) keep the ingest path alive when
+#   Redis disappears abruptly — events keep landing in Postgres and the
+#   resilience layer's degraded-mode log line fires.
 #
-# Pass criteria (matches docs/phase-19-plan.md line 67 + chaos-redis.yml
-# inline eval — this script is the local single-source-of-truth that the
-# CI workflow optionally sources via lib/evaluate.sh):
-#   - sim_tracebacks       == 0    (load_harness degraded gracefully)
-#   - backend_tracebacks   == 0    (safe_redis swallowed every redis call)
-#   - event_count_5min     > 0     (ingest survived; events landed)
-#   - degraded_warnings    > 0     (redis_degraded log fired — proves
-#                                   safe_redis actually engaged, not lucky
-#                                   timing on the kill window)
-#
-# accept_pct and transport_errors are PRINTED but NOT gated. The §A1 plan
-# (docs/phase-19.5-plan.md line 30) defines pass as the four counters
-# above — accept_pct/transport_errors were over-spec'd from restart_postgres.sh
-# during initial drafting. On Windows+WSL2 specifically, accept_pct
-# *will* drop and transport_errors *will* spike during the dead-redis
-# window because `getaddrinfo("redis")` takes ~3.6s to return NXDOMAIN
-# on WSL2 (vs near-instant on real Linux). This is a documented platform
-# quirk, not a backend regression — see chaos-redis.yml header. The CI
-# workflow runs on ubuntu-latest where the quirk doesn't apply.
-#
-# Usage (after `bash start.sh`):
+# How to run (stack must already be up via 'bash start.sh'):
 #   bash labs/chaos/scenarios/kill_redis.sh
 #
-# Override defaults via env vars:
-#   RATE=200 DURATION=60 KILL_AT=20 RESTORE_AFTER=20 \
-#       bash labs/chaos/scenarios/kill_redis.sh
+#   Override defaults via env vars:
+#     SPEED=0.2 KILL_AT=6 RESTORE_AFTER=30 bash labs/chaos/scenarios/kill_redis.sh
 #
-# CI equivalent: .github/workflows/chaos-redis.yml (uses the simulator with
-# --no-verify rather than load_harness; both drivers exercise the same
-# safe_redis code path, but the local script uses load_harness for
-# deterministic counters).
+# Four §A1 acceptance counters:
+#   1. sim_tracebacks       == 0   (simulator degraded gracefully; never raised)
+#   2. backend_tracebacks   == 0   (safe_redis caught every redis call cleanly)
+#   3. event_count_5min     > 0    (ingest survived; events landed in Postgres)
+#   4. degraded_warnings    > 0    (redis_degraded / EventBus consumer crashed fired)
+#      pattern: "redis_degraded|redis_state=unavailable|degraded mode|EventBus consumer crashed"
+#
+# GH Actions equivalent: .github/workflows/chaos-redis.yml
+#   This script is the local host-runnable sibling of that workflow.
+#   Both source labs/chaos/lib/evaluate.sh so the four counters are
+#   computed identically on CI (ubuntu-latest) and on the operator's machine.
+#   The workflow is NOT modified by this script — it stays as the CI gate.
 
 set -uo pipefail
 
@@ -55,64 +37,66 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 . "$SCRIPT_DIR/../lib/evaluate.sh"
 
 # ----------------------------------------------------------------------------
-# Defaults (overridable via env)
+# Defaults — match the chaos-redis.yml workflow inputs exactly.
+# Override via env vars before running the script.
 # ----------------------------------------------------------------------------
-: "${RATE:=100}"            # events/sec
-: "${DURATION:=30}"          # seconds
-: "${KILL_AT:=10}"           # seconds into the run when redis gets killed
-: "${RESTORE_AFTER:=15}"     # seconds redis stays dead before restore
-: "${SCENARIO_NAME:=kill_redis}"
-# transport_errors is NOT gated (see header comment). The default is
-# kept here as informational only — printed in the summary block but
-# not used in the pass/fail decision.
-: "${TRANSPORT_ERRORS_MAX:=99999}"
+: "${SPEED:=0.1}"
+: "${KILL_AT:=4}"
+: "${RESTORE_AFTER:=25}"
 
-# Defensive trap: ensure stack returns to usable state even on script
-# failure. cleanup_chaos_state in lib/evaluate.sh already restarts redis
-# if it's missing, so a Ctrl-C during the dead-redis window leaves us in
-# a usable state.
+# ----------------------------------------------------------------------------
+# Token — required to drive the simulator from the host.
+# read_token_from_env reads CCT_AGENT_TOKEN from infra/compose/.env.
+# ----------------------------------------------------------------------------
+TOKEN=$(read_token_from_env)
+if [ -z "$TOKEN" ]; then
+    echo "FAIL: CCT_AGENT_TOKEN is empty — run 'bash start.sh' first to provision the token"
+    exit 1
+fi
+
+# Defensive trap: calls cleanup_chaos_state on any exit so a partial run
+# (Ctrl-C, script error mid-chaos) doesn't leave Redis dead. Defined in
+# labs/chaos/lib/evaluate.sh — already knows to restart redis if missing.
 trap 'cleanup_chaos_state' EXIT
 
 echo "================================================================"
 echo "  chaos scenario A1: kill_redis"
-echo "  rate=$RATE/s  duration=${DURATION}s  kill_at=${KILL_AT}s  restore_after=${RESTORE_AFTER}s"
+echo "  speed=$SPEED  kill_at=${KILL_AT}s  restore_after=${RESTORE_AFTER}s"
 echo "================================================================"
 
-# ----------------------------------------------------------------------------
-# Pre-flight: stack must be up.
-# ----------------------------------------------------------------------------
+# Pre-flight: stack must be up before we start injecting chaos.
 if ! curl -sf http://localhost:8000/healthz > /dev/null 2>&1; then
     echo "FAIL: backend not reachable at http://localhost:8000/healthz — bring up the stack with 'bash start.sh' first"
     exit 1
 fi
-
-# Demo-data wipe needs admin role. The cct-agent token is `analyst`, so this
-# would 403. Skip the wipe and rely on the 5-min event window — the baseline
-# auto-seed events fall outside the chaos window we measure.
-echo "[$(date +%T)] Pre-flight OK. (Skipping demo-data wipe — admin-only endpoint, analyst token cannot use it.)"
+echo "[$(date +%T)] Pre-flight OK."
 
 # ----------------------------------------------------------------------------
-# Start the load harness in the background, inside the backend container so
-# we don't depend on host httpx.
+# Start the simulator in the background.
+#
+# --no-verify because the §A1 acceptance bar is graceful degradation, not
+# "incident tree forms perfectly during chaos." Events fired while Redis is
+# dead miss correlation (the correlator needs Redis windowed state), which
+# is the documented degraded behaviour, not a failure. See chaos-redis.yml
+# header for full rationale.
 # ----------------------------------------------------------------------------
-HARNESS_LOG="/tmp/cct_chaos_a1_harness.log"
-: > "$HARNESS_LOG"
-
-echo "[$(date +%T)] Starting load harness ${RATE}/s × ${DURATION}s inside backend container..."
-MSYS_NO_PATHCONV=1 docker compose -f "$CHAOS_COMPOSE_FILE" --profile "$CHAOS_COMPOSE_PROFILE" \
-    exec -T backend python labs/perf/load_harness.py \
-    --base-url http://localhost:8000 --rate "$RATE" --duration "$DURATION" \
-    > "$HARNESS_LOG" 2>&1 &
-HARNESS_PID=$!
-: "${HARNESS_PID:=0}"
-echo "[$(date +%T)] Harness PID=$HARNESS_PID. Sleeping ${KILL_AT}s before redis kill..."
+python -m labs.simulator \
+    --scenario credential_theft_chain \
+    --speed "$SPEED" \
+    --api http://localhost:8000 \
+    --token "$TOKEN" \
+    --no-verify \
+    > sim.log 2>&1 &
+SIM_PID=$!
+: "${SIM_PID:=0}"
+echo "[$(date +%T)] Simulator backgrounded  PID=$SIM_PID. Sleeping ${KILL_AT}s before redis kill..."
 
 sleep "$KILL_AT"
 
 # ----------------------------------------------------------------------------
-# The chaos: kill redis (SIGKILL) — most aggressive form. No SIGTERM grace
-# period. From safe_redis's perspective the connection just disappears
-# mid-call.
+# The chaos: kill Redis (SIGKILL — abrupt, no SIGTERM grace window).
+# From safe_redis's perspective the connection just disappears mid-call,
+# which is the worst-case failure mode we're testing.
 # ----------------------------------------------------------------------------
 echo "----- kill redis -----"
 docker compose -f "$CHAOS_COMPOSE_FILE" --profile "$CHAOS_COMPOSE_PROFILE" \
@@ -125,123 +109,79 @@ sleep "$RESTORE_AFTER"
 echo "----- restore redis -----"
 docker compose -f "$CHAOS_COMPOSE_FILE" --profile "$CHAOS_COMPOSE_PROFILE" \
     up -d redis || true
-echo "[$(date +%T)] Redis restored. Waiting for harness to finish..."
+echo "[$(date +%T)] Redis restored. Waiting for simulator to finish..."
 
-# Wait for harness completion. `wait` returns the harness exit code; we
-# treat it as informational because the four §A1 counters below are the
-# pass criteria.
-if [ "$HARNESS_PID" -gt 0 ]; then
-    wait "$HARNESS_PID" || true
-    HARNESS_EXIT=$?
+# Wait for simulator completion. Exit code is informational — the four §A1
+# counters below are the pass/fail criteria, not the simulator's exit code.
+: "${SIM_PID:=0}"
+if [ "$SIM_PID" -gt 0 ]; then
+    wait "$SIM_PID" || true
+    SIM_EXIT=$?
 else
-    HARNESS_EXIT=99
+    SIM_EXIT=99
 fi
-
-echo "[$(date +%T)] Harness done. exit=$HARNESS_EXIT (informational; the four §A1 counters are the pass criteria)"
+echo "[$(date +%T)] Simulator done.  SIM_EXIT=$SIM_EXIT (informational)"
 
 # ----------------------------------------------------------------------------
-# Capture logs inline. The load_harness output IS the sim.log for this scenario.
+# Capture and print logs inline so the operator can see the chaos evidence
+# directly in the terminal output without inspecting separate files.
 # ----------------------------------------------------------------------------
 echo "================================================================"
-echo "  load_harness output (sim.log equivalent)"
+echo "  sim.log (full)"
 echo "================================================================"
-cat "$HARNESS_LOG" || true
+cat sim.log || true
 echo "================================================================"
-echo "  end harness output"
+echo "  end sim.log"
 echo "================================================================"
 
-BACKEND_LOG="/tmp/cct_chaos_a1_backend.log"
-# Capture by time window, not tail line count. The 250-line tail used by
-# A2-A6 is too short for A1: the load_harness ingest path logs ~20
-# sqlalchemy.engine.Engine INFO lines per event (roughly 60 events/sec
-# × 30s = 36k SQL lines for a full run), which buries the relatively
-# sparse "redis_degraded" / "EventBus consumer crashed" lines that
-# we're counting on. Use --since to grab the entire chaos window.
-docker compose -f "$CHAOS_COMPOSE_FILE" --profile "$CHAOS_COMPOSE_PROFILE" \
-    logs backend --since 2m \
-    > "$BACKEND_LOG" 2>&1 || true
 echo "================================================================"
-echo "  backend logs (last 2 minutes, redis-related lines only)"
+echo "  backend logs (last 250 lines)"
 echo "================================================================"
-# Print the resilience-relevant lines inline so the chaos signal is
-# visible in the script output. Full log stays on disk in $BACKEND_LOG.
-grep -iE "redis|degraded|safe_redis|EventBus|ConnectionError" "$BACKEND_LOG" | head -50 || true
+capture_backend_log backend.log 250
+cat backend.log || true
 echo "================================================================"
-echo "  end backend logs (full $(wc -l < "$BACKEND_LOG" 2>/dev/null || echo 0) lines on disk at $BACKEND_LOG)"
+echo "  end backend logs"
 echo "================================================================"
 
 # ----------------------------------------------------------------------------
-# Compute the four §A1 counters using shared helpers.
+# Compute the four §A1 counters using the shared helpers from lib/evaluate.sh.
+# These same helpers run on CI inside chaos-redis.yml — single source of truth.
 # ----------------------------------------------------------------------------
-SIM_TB=$(count_traceback_lines "$HARNESS_LOG")
-BE_TB=$(count_traceback_lines "$BACKEND_LOG")
+SIM_TB=$(count_traceback_lines sim.log)
+BE_TB=$(count_traceback_lines backend.log)
 EVT_COUNT=$(count_postgres_events_5min)
 
-# A1 degraded pattern — matches docs/phase-19.5-plan.md line 30:
-# "redis_degraded|redis_state=unavailable|degraded mode|EventBus consumer crashed"
-# These are the four distinct log shapes safe_redis() and the EventBus
-# supervisor emit when redis is unreachable. Any one of them firing
-# proves the resilience layer engaged.
-DEGRADED=$(count_degraded_warnings "$BACKEND_LOG" \
+# A1 degraded-mode pattern — matches docs/phase-19.5-plan.md §A1 verbatim.
+# Any one of these log shapes proves the resilience layer engaged:
+#   redis_degraded           — safe_redis() log emit (redis_state.py:61)
+#   redis_state=unavailable  — structured field variant
+#   degraded mode            — human-readable fallback phrase
+#   EventBus consumer crashed — EventBus._supervisor() restart log (bus.py:97-123)
+DEGRADED=$(count_degraded_warnings backend.log \
     "redis_degraded|redis_state=unavailable|degraded mode|EventBus consumer crashed")
 
-# Pull harness raw counters from the JSON summary line.
-HARNESS_SENT=$(grep -E '"sent":' "$HARNESS_LOG" | head -1 \
-    | grep -oE '[0-9]+' | head -1 || echo 0)
-: "${HARNESS_SENT:=0}"
-HARNESS_ACCEPTED=$(grep -E '"accepted":' "$HARNESS_LOG" | head -1 \
-    | grep -oE '[0-9]+' | head -1 || echo 0)
-: "${HARNESS_ACCEPTED:=0}"
-HARNESS_FAILED_5XX=$(grep -E '"failed_5xx":' "$HARNESS_LOG" | head -1 \
-    | grep -oE '[0-9]+' | head -1 || echo 0)
-: "${HARNESS_FAILED_5XX:=0}"
-HARNESS_TRANSPORT_ERRORS=$(grep -E '"transport_errors":' "$HARNESS_LOG" | head -1 \
-    | grep -oE '[0-9]+' | head -1 || echo 0)
-: "${HARNESS_TRANSPORT_ERRORS:=0}"
-HARNESS_P95=$(grep -E '"p95":' "$HARNESS_LOG" | head -1 \
-    | grep -oE '[0-9]+(\.[0-9]+)?' | head -1 || echo 0)
-: "${HARNESS_P95:=0}"
-
-# Acceptance ratio (integer percentage).
-if [ "$HARNESS_SENT" -gt 0 ]; then
-    ACCEPT_PCT=$(( (HARNESS_ACCEPTED * 100) / HARNESS_SENT ))
-else
-    ACCEPT_PCT=0
-fi
-
 print_acceptance_summary "$SIM_TB" "$BE_TB" "$EVT_COUNT" "$DEGRADED"
-echo "  A1 extras (load_harness counters — informational, NOT gated on WSL2):"
-printf "    sent / accepted    = %s / %s  (accept_pct=%s%%)\n" "$HARNESS_SENT" "$HARNESS_ACCEPTED" "$ACCEPT_PCT"
-printf "    failed_5xx         = %s  (informational; redis-down may produce some)\n" "$HARNESS_FAILED_5XX"
-printf "    transport_errors   = %s  (informational; WSL2 DNS quirk — see header)\n" "$HARNESS_TRANSPORT_ERRORS"
-printf "    latency p95        = %sms  (informational)\n" "$HARNESS_P95"
+echo "  simulator_exit     = $SIM_EXIT  (informational)"
 echo "================================================================"
 
 # ----------------------------------------------------------------------------
-# Pass/fail decision — strict §A1 criteria.
-#
-# Note on degraded_warnings: unlike A4 (where degraded_warnings was relaxed
-# to informational because the cursor-advance assertion was the real proof),
-# A1 KEEPS degraded_warnings > 0 as a hard requirement. The redis_degraded
-# log line is the smoking gun that safe_redis actually engaged — without it,
-# we got lucky timing (the kill missed every redis call) and the test isn't
-# proving anything.
+# Pass/fail decision — strict §A1 criteria (matches chaos-redis.yml exactly).
 # ----------------------------------------------------------------------------
 FAIL=0
 if [ "$SIM_TB" -gt 0 ]; then
-    echo "FAIL: load_harness produced $SIM_TB traceback(s) — should degrade gracefully through redis kill"
+    echo "FAIL: sim.log contains $SIM_TB traceback(s) — simulator should degrade gracefully through the Redis kill"
     FAIL=1
 fi
 if [ "$BE_TB" -gt 0 ]; then
-    echo "FAIL: backend produced $BE_TB traceback(s) — safe_redis should swallow every redis call cleanly"
+    echo "FAIL: backend.log contains $BE_TB traceback(s) — safe_redis() should swallow every redis call cleanly"
     FAIL=1
 fi
 if [ "$EVT_COUNT" -le 0 ]; then
-    echo "FAIL: 0 events in postgres last 5 min — ingest didn't survive the redis kill"
+    echo "FAIL: 0 events in Postgres last 5 min — ingest path didn't survive the Redis kill"
     FAIL=1
 fi
 if [ "$DEGRADED" -le 0 ]; then
-    echo "FAIL: degraded_warnings=0 — safe_redis didn't fire (or the kill window missed every redis call). Tune KILL_AT/RESTORE_AFTER or check that the safe_redis log emit is wired."
+    echo "FAIL: degraded_warnings=0 — safe_redis/EventBus supervisor didn't fire (or the kill window missed every Redis call). Tune KILL_AT/RESTORE_AFTER or verify the safe_redis log emit is wired."
     FAIL=1
 fi
 
@@ -250,5 +190,5 @@ if [ "$FAIL" -ne 0 ]; then
     exit 1
 fi
 
-echo "PASS: §A1 acceptance met — ${DEGRADED} degraded warning(s), ${EVT_COUNT} events in last 5min, 0 tracebacks (accept_pct=${ACCEPT_PCT}% informational on WSL2)"
+echo "PASS: §A1 acceptance met — ${DEGRADED} degraded warning(s), ${EVT_COUNT} events in last 5min, 0 tracebacks"
 exit 0
