@@ -188,6 +188,15 @@ services:
       - AUDIT_WRITE
       - AUDIT_CONTROL
       - NET_ADMIN
+      # NOTE: AUDIT_READ was tested in Phase 21.5 and did NOT unblock
+      # auditctl. The WSL2 kernel (6.6.x-microsoft-standard-WSL2) ships
+      # with CONFIG_AUDIT but WITHOUT CONFIG_AUDITSYSCALL — `/proc/sys/
+      # kernel/audit_enabled` is absent, the syscall-tap subsystem is
+      # not compiled in, and no capability or `--privileged` setting
+      # will produce execve events on this kernel. Real auditd events
+      # require either (a) a Linux VM with a full kernel, or (b) an
+      # eBPF-based fallback, or (c) synthetic injection. Documented in
+      # docs/phase-21.5-summary.md "Verification" section.
     volumes:
       # Share /var/log with the cct-agent so the agent can tail auth.log.
       - lab_logs:/var/log
