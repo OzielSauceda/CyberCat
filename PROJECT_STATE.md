@@ -6,7 +6,7 @@ Living status document. Update as reality changes. Short, current, honest.
 
 ## ⏯ Pick up next session
 
-> **Session paused 2026-05-07 with Phase 21.5 code complete (this branch).** Three rigging helpers landed under `labs/caldera/`: `upload_custom_abilities.py`, `seed_fact_source.py`, and the declarative `facts.yml`. `build_operation_request.py` now references `cybercat-phase21` instead of the empty `basic` source. Task 3 (cleanup-deadman) deferred — see `docs/phase-21.5-summary.md` for the static-analysis reasoning. **No code-validation needed in CI** (helpers are operator tooling, no backend Python touched). **The closing-of-the-loop validation is a scorecard re-run**: `bash labs/caldera/run.sh` after running the new helpers — target ≥12/17 covered, vs 0/17 at Phase 21 baseline.
+> **Session paused 2026-05-07 with Phase 21.5 shipped AND validated (this branch).** Three rigging helpers landed under `labs/caldera/` plus a real bug fix in `scorer.py` (deadman-overwrites-real-status) caught during validation. Empirical re-run scored: ability errors **14 → 6**, gaps **3 → 10** — rigging is no longer the bottleneck. Coverage stayed at 0/17 because `auditd` doesn't run on Docker Desktop on Windows (pre-existing Phase 16.9 constraint, not Phase 21.5 territory). Lifting that is a separate phase. See `docs/phase-21.5-summary.md` "Verification — actual measured results" for full numbers and the auditd-on-Windows analysis.
 
 > **Branch ancestry (as of this commit):**
 > - `origin/main` → `cfbae8e` (post-v1.0)

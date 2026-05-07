@@ -60,6 +60,35 @@ def score(
     #        report.host_group = [ {paw, links: [ {ability: {...}, ...} ] } ]
     # Try all three layouts, flatten into a uniform `ran` dict keyed
     # by ability_id.
+    # Status priority: lower is "better" (we want this entry to win).
+    # 0 = SUCCESS  → priority 0
+    # 1 = FAILED   → priority 1
+    # -3 = UNTRUSTED (often deadman cleanup that didn't complete) → priority 2
+    # other → priority 3
+    # Phase 21.5 fix: an ability with both a real run (status=0) and a
+    # deadman cleanup that ended UNTRUSTED (status=-3) used to render as
+    # ability-failed because the deadman link arrived later and the
+    # `ran[aid] = step` later-wins logic overwrote the real status. Now
+    # we keep the entry whose status is best — the real run beats the
+    # cleanup attempt every time.
+    def _status_priority(s: object) -> int:
+        if s in (0, "0", "success"):
+            return 0
+        if s in (1, "1"):
+            return 1
+        if s in (-3, "-3"):
+            return 2
+        return 3
+
+    def _record(aid: str, step: dict) -> None:
+        # Skip steps that never actually ran (deadman cleanups that
+        # timed out have run=None / agent_reported_time=None).
+        if step.get("run") is None and step.get("agent_reported_time") is None and step.get("status") in (-3, "-3"):
+            return
+        existing = ran.get(aid)
+        if existing is None or _status_priority(step.get("status")) < _status_priority(existing.get("status")):
+            ran[aid] = step
+
     ran: dict[str, dict] = {}
     steps_obj = caldera_report.get("steps") or {}
     if isinstance(steps_obj, dict):
@@ -72,7 +101,7 @@ def score(
                     continue
                 aid = step.get("ability_id")
                 if aid:
-                    ran[aid] = step
+                    _record(aid, step)
     for hg in caldera_report.get("host_group") or []:
         if not isinstance(hg, dict):
             continue
@@ -84,7 +113,7 @@ def score(
             if aid:
                 # Flatten ability metadata onto the link so downstream
                 # `step.get("status")` / `step.get("output")` keep working.
-                ran[aid] = {**link, "ability_id": aid}
+                _record(aid, {**link, "ability_id": aid})
 
     rows: list[dict] = []
     for ab in expectations.get("abilities", []):

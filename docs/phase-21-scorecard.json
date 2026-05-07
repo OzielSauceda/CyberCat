@@ -1,14 +1,14 @@
 {
-  "operation_id": "326fde6c-fd74-434a-92b6-6275ab5e70e5",
-  "generated_at": "2026-05-06T04:56:29+00:00",
+  "operation_id": "6994c565-fe7d-4793-a8c4-b29359ca338c",
+  "generated_at": "2026-05-07T17:14:03+00:00",
   "summary": {
     "total": 17,
     "covered": 0,
-    "gap": 3,
-    "false_negative": 0,
+    "gap": 10,
+    "false_negative": 1,
     "unexpected_hit": 0,
-    "ability_failed": 9,
-    "ability_skipped": 5
+    "ability_failed": 6,
+    "ability_skipped": 0
   },
   "rows": [
     {
@@ -46,9 +46,9 @@
       "name": "/etc/passwd read (local)",
       "technique": "T1003.008",
       "expected_rule_id": "GAP",
-      "caldera_status": -3,
+      "caldera_status": 0,
       "fired_rules": [],
-      "status": "ability-failed",
+      "status": "gap",
       "notes": "Credential-discovery file read undetected \u2014 Phase 22 input."
     },
     {
@@ -66,9 +66,9 @@
       "name": "SSH lateral pivot (sshd \u2192 bash \u2192 ssh)",
       "technique": "T1021.004",
       "expected_rule_id": "GAP",
-      "caldera_status": "n/a",
+      "caldera_status": 0,
       "fired_rules": [],
-      "status": "ability-skipped",
+      "status": "gap",
       "notes": "Linux process-chain undetected (Gap 1, A1 evidence)."
     },
     {
@@ -76,9 +76,9 @@
       "name": "curl | sh persistence",
       "technique": "T1105",
       "expected_rule_id": "GAP",
-      "caldera_status": "n/a",
+      "caldera_status": 0,
       "fired_rules": [],
-      "status": "ability-skipped",
+      "status": "gap",
       "notes": "Download-and-execute pattern undetected (Gap 1, A1+A2 evidence)."
     },
     {
@@ -86,9 +86,9 @@
       "name": "SUDO brute-force",
       "technique": "T1110.001",
       "expected_rule_id": "py.auth.failed_burst",
-      "caldera_status": -3,
+      "caldera_status": 0,
       "fired_rules": [],
-      "status": "ability-failed",
+      "status": "false-negative",
       "notes": "Match to backend/app/detection/rules/auth_failed_burst.py.\nThreshold: 4 failures within 60s windowed by user. Stockpile's\nsudo-brute-force-debian repeatedly invokes `sudo` with bad\npasswords; sshd/PAM logs the failures the same way ssh login\nfailures are logged.\n"
     },
     {
@@ -96,9 +96,9 @@
       "name": "clean cred-theft + AWS creds read + login from new IP",
       "technique": "T1078",
       "expected_rule_id": "GAP",
-      "caldera_status": "n/a",
+      "caldera_status": 0,
       "fired_rules": [],
-      "status": "ability-skipped",
+      "status": "gap",
       "notes": "Reads /home/realuser/.aws/credentials, exfils via curl, then logs\nin cleanly from a brand-new IP. No preceding failures, so\nauth_anomalous_source_success stays silent (Gap 3). Phase 22\ncandidate: auth_baseline_unknown_source_success.\n"
     },
     {
@@ -106,9 +106,9 @@
       "name": "file-burst rename (30\u00d7 .encrypted in 60s)",
       "technique": "T1486",
       "expected_rule_id": "GAP",
-      "caldera_status": "n/a",
+      "caldera_status": 1,
       "fired_rules": [],
-      "status": "ability-skipped",
+      "status": "ability-failed",
       "notes": "No file-creation rate detector exists (Gap 4, A4 evidence)."
     },
     {
@@ -116,9 +116,9 @@
       "name": "useradd backdoor account",
       "technique": "T1098",
       "expected_rule_id": "GAP",
-      "caldera_status": "n/a",
+      "caldera_status": 0,
       "fired_rules": [],
-      "status": "ability-skipped",
+      "status": "gap",
       "notes": "No account-manipulation detector \u2014 Phase 22 input."
     },
     {
@@ -136,9 +136,9 @@
       "name": "cron persistence (/etc/cron.d/...)",
       "technique": "T1546.003",
       "expected_rule_id": "GAP",
-      "caldera_status": -3,
+      "caldera_status": 0,
       "fired_rules": [],
-      "status": "ability-failed",
+      "status": "gap",
       "notes": "No persistence detector \u2014 Phase 22 input."
     },
     {
@@ -146,9 +146,9 @@
       "name": "bash history wipe",
       "technique": "T1070.003",
       "expected_rule_id": "GAP",
-      "caldera_status": -3,
+      "caldera_status": 0,
       "fired_rules": [],
-      "status": "ability-failed",
+      "status": "gap",
       "notes": "No indicator-removal detector \u2014 Phase 22 input."
     },
     {
@@ -156,7 +156,7 @@
       "name": "tarball stage (data compressed)",
       "technique": "T1560.001",
       "expected_rule_id": "GAP",
-      "caldera_status": -3,
+      "caldera_status": 1,
       "fired_rules": [],
       "status": "ability-failed",
       "notes": "Staging-archive pattern undetected (A4 evidence)."
@@ -176,7 +176,7 @@
       "name": "systemd persistence (write .service file)",
       "technique": "T1543.002",
       "expected_rule_id": "GAP",
-      "caldera_status": -3,
+      "caldera_status": 1,
       "fired_rules": [],
       "status": "ability-failed",
       "notes": "No systemd-unit detector \u2014 Phase 22 input."
