@@ -94,6 +94,8 @@ Each entry follows the same shape:
 - [Git Bash MSYS path translation](#git-bash-msys-path-translation)
 - [PAM authentication failure surface (sshd vs sudo vs su)](#pam-authentication-failure-surface-sshd-vs-sudo-vs-su)
 - [Idempotent PUT-by-id (REST upsert pattern)](#idempotent-put-by-id-rest-upsert-pattern)
+- [Linux kernel CONFIG_AUDIT vs CONFIG_AUDITSYSCALL](#linux-kernel-config_audit-vs-config_auditsyscall)
+- [Caldera 4.2.0 newline-strip in plaintext_command](#caldera-420-newline-strip-in-plaintext_command)
 
 ### Verification
 - [Smoke tests vs unit tests vs integration tests](#smoke-tests-vs-unit-tests-vs-integration-tests)
@@ -4212,6 +4214,79 @@ That dance has TOCTOU (time-of-check-to-time-of-use) hazards under concurrent ca
 - *Cosmetic but real:* PUT-by-id requires the client to URL-encode the ID. Caldera's IDs are alphanumeric-with-dashes, so this never bites us — but if you used a UUID or a slug with `/` in it, you'd need encoding.
 
 **Related entries:** [ON CONFLICT DO UPDATE / DO NOTHING (upserts and idempotent inserts)](#on-conflict-do-update--do-nothing-upserts-and-idempotent-inserts) · [SETNX (set-if-not-exists) for dedup](#setnx-set-if-not-exists-for-dedup) · [Caldera atomic planner — facts, fact sources, deadman links](#caldera-atomic-planner--facts-fact-sources-deadman-links)
+
+---
+
+## Linux kernel CONFIG_AUDIT vs CONFIG_AUDITSYSCALL
+*Introduced: Phase 21.5* · *Category: Systems*
+
+**Intuition:** "Has audit support" sounds like one feature, but it's actually two separate kernel build-time options. `CONFIG_AUDIT` is the *framework* — the netlink socket, the daemon-protocol plumbing, the `audit.log` writer. `CONFIG_AUDITSYSCALL` is the *thing that actually traps every system call* (execve, open, etc.) and turns it into an event. A kernel with `CONFIG_AUDIT=y` but `CONFIG_AUDITSYSCALL=n` will let `auditd` start cleanly, write `DAEMON_START` lines, and *generate zero process events*. You can spend hours wondering why the agent is silent before realizing the kernel was simply built without the syscall-tap.
+
+**Precise:** Linux's audit subsystem has two independent build options (see `kernel/Kconfig`):
+
+- **`CONFIG_AUDIT=y`** enables the base framework — the `AF_NETLINK` family `NETLINK_AUDIT` socket, the user-space daemon protocol, the `auditctl -s` status path, the `DAEMON_START` / `DAEMON_END` log records.
+- **`CONFIG_AUDITSYSCALL=y`** enables the per-syscall hook (the `audit_syscall_entry` / `audit_syscall_exit` calls inserted into every `SYSCALL_DEFINE*` macro), the rule-matching engine that decides whether to emit a `SYSCALL` / `EXECVE` record, and the `/proc/sys/kernel/audit_enabled` sysfs entry.
+
+The two are *independent* — you can have the framework without syscall tracing. The clean diagnostic: check whether `/proc/sys/kernel/audit_enabled` exists. If it does, the kernel has `CONFIG_AUDITSYSCALL=y` and `auditctl -a` should work (modulo capabilities). If it does not exist, no rule will ever fire because the trap points aren't in the kernel binary at all.
+
+**Why it exists:** `CONFIG_AUDITSYSCALL=y` adds a small per-syscall cost (a few cycles to check whether any rule matches the current syscall) even when no rules are loaded. Distros optimized for cloud / minimal kernels often disable it to shave startup time and avoid attack surface they don't need. WSL2's Microsoft-provided kernel is one such build (verified in Phase 21.5: `6.6.87.2-microsoft-standard-WSL2`).
+
+**Where in CyberCat:**
+
+- The `cct-agent`'s auditd source (`agent/cct_agent/parsers/auditd.py`) tails `/var/log/audit/audit.log`. On a kernel with `CONFIG_AUDITSYSCALL=y`, `auditd` writes `EXECVE` / `SYSCALL` records there as commands run; the agent parses them into `process.created` events.
+- On Docker Desktop on Windows, the WSL2 kernel lacks `CONFIG_AUDITSYSCALL`, so `auditd` writes only `DAEMON_*` and any synthetic / pre-baked records. **No real process events ever land**, regardless of `cap_add` (`CAP_AUDIT_CONTROL`, `CAP_AUDIT_READ`) or `--privileged` settings. `/proc/sys/kernel/audit_enabled` being absent is the smoke gun.
+- This means real Caldera-driven validation on the operator's laptop requires either (a) a Linux VM with a full kernel (Multipass on Windows is the lightest path), (b) an eBPF-based replacement that doesn't depend on the audit subsystem, or (c) synthetic injection of audit-shaped lines from outside the kernel. Phase 21.5 documented all three; choice deferred.
+
+**Where else you'll see it:**
+
+- **Container-optimized OS images** (Bottlerocket, Talos, Flatcar) often disable `CONFIG_AUDITSYSCALL` for the same minimal-footprint reason. Tools like Falco that need syscall events ship eBPF probes specifically because they can't assume audit is available.
+- **WSL1 vs WSL2:** WSL1 had no kernel of its own (translation layer); WSL2 has a real Linux kernel, but it's Microsoft's build with their config choices. Audit choices may change across WSL2 kernel updates.
+- **Cloud images** vary: Amazon Linux 2 has `CONFIG_AUDITSYSCALL=y` by default. Some hardened-Debian builds do not. Always check `/proc/sys/kernel/audit_enabled` before assuming.
+- **GKE COS / EKS Bottlerocket**: many cluster-runtime images lack syscall audit, which is why eBPF-based runtime-security tooling dominates that ecosystem.
+
+**Tradeoffs:**
+
+- *Auditd path:* low-overhead when off, mature tooling, integrates with PAM and other security subsystems out of the box. Cost: requires kernel cooperation; the rule language is fiddly; cleanup requires disabling rules carefully.
+- *eBPF path:* portable across container kernels, doesn't need `CONFIG_AUDITSYSCALL`, can attach to any tracepoint. Cost: needs a recent-ish kernel (≥4.18 for `BPF_PROG_TYPE_TRACEPOINT`), more code to write, harder to debug than reading `audit.log`.
+- *Synthetic injection:* zero kernel dependency, deterministic, ideal for tests. Cost: only validates the parser-→-detector path, not kernel-→-parser. False sense of coverage if used as the *only* validation.
+
+**Related entries:** [auditd (EXECVE / SYSCALL / EOE)](#auditd-execve--syscall--eoe) · [PAM authentication failure surface (sshd vs sudo vs su)](#pam-authentication-failure-surface-sshd-vs-sudo-vs-su) · [Tail-and-checkpoint pattern](#tail-and-checkpoint-pattern)
+
+---
+
+## Caldera 4.2.0 newline-strip in plaintext_command
+*Introduced: Phase 21.5* · *Category: Project Pattern*
+
+**Intuition:** When Caldera 4.2.0 dispatches an ability to a Sandcat agent, it strips literal newlines (`\n`, 0x0A) from the command body — but it does *not* insert any separator. A multi-line bash script becomes a single mashed-together line. `mkdir -p /tmp/loot\nfor i in $(seq 1 30); do` becomes `mkdir -p /tmp/lootfor i in $(seq 1 30); do`. Bash parses that as creating a directory named `lootfor`, then chokes on `i in $(seq 1 30); do` as a syntax error. The ability returns exit 1 even though the YAML and the API-stored form both look correct.
+
+**Precise:** Caldera 4.2.0's link-dispatch path renders an ability's `command` field by collapsing `\n` characters out of the string before passing it to the agent's executor wrapper (`bash -c "<command>"` for the Linux/sh executor). The on-disk YAML uses block scalar literals (`|`) which preserve newlines through PyYAML; the REST API (`PUT /api/v2/abilities/{id}`) accepts and stores the command with newlines intact (verified by `GET /api/v2/abilities/{id}` returning the full multi-line string). The mangling happens between *storage* and *dispatch*, in the planner's command-rendering step. The resulting `plaintext_command` field in the operation report shows the stripped form — that's the diagnostic surface.
+
+**The failure modes:**
+
+- **Hard fail (exit 1):** abilities with a `for`/`while`/`if` block where the keyword (`for`, `done`, `then`, `fi`) needs to be a separate statement. Bash treats consecutive non-separated tokens as one command and errors out.
+- **Silent miscarriage (exit 0):** abilities that look successful but executed mangled code. Example: `useradd -m -s /bin/bash backdoor || true\necho 'pw' | chpasswd` becomes `useradd -m -s /bin/bash backdoor || true echo 'pw' | chpasswd` which bash parses as `useradd ... echo backdoor:pw | chpasswd` — useradd succeeds (exit 0) but the chpasswd input is garbled and runs against useradd's exit status, not against `backdoor:pw`. The user gets created but with no password set.
+- **Survives intact:** abilities whose effective code is a single statement preceded only by comments (`#`-prefixed lines). After stripping, the comments fuse into one line that bash treats as one big comment, and the actual command line follows untouched.
+
+**Why it exists:** Speculation — looks like Caldera 4.2.0's command-rendering uses a fact-substitution step that splits/joins on newline boundaries during placeholder resolution and forgets to re-insert separators. Could also be a YAML-loading shortcut that misuses `replace('\n', '')` instead of `replace('\n', '; ')`. Not investigated upstream because Caldera 4.2.0 is a frozen pin (5.0.0 was broken — see ADR-0016).
+
+**Workaround (Phase 21.5):** rewrite custom abilities so the `command` body is a single line with explicit `;` separators between statements. The YAML stays readable via inline comments at the executor level. For heredocs (`cat <<EOF\n...EOF`), substitute `printf 'multi\\nline\\nbody\\n' >`. For if-blocks, use the single-line form `if cond ; then A ; else B ; fi`. For loops, `for i in X ; do A ; done`.
+
+**Where in CyberCat:**
+
+- `labs/caldera/abilities/linux_file_burst_encrypt.yml`, `linux_creds_aws_read.yml`, `linux_useradd_persist.yml` — all rewritten as single-line bash with explanatory YAML-level comments at the executor.
+- `labs/caldera/abilities/linux_lateral_ssh.yml`, `linux_curl_pipe_sh.yml` — left as multi-line because their effective code is a single `bash -c '...'` statement; the comment lines fuse harmlessly.
+- The diagnostic pattern: when an ability returns status=1 unexpectedly, read the saved `labs/caldera/.tmp/caldera-op-*.json` and inspect the failing step's `plaintext_command` field — if it's missing newlines, that's the bug.
+
+**Where else you'll see it:**
+
+- **Atomic Red Team's PowerShell driver** has had similar issues with newline-handling in `prerequisites` blocks across versions.
+- **Ansible's `shell:` module** *does* preserve newlines, but `command:` interprets each whitespace-separated token as a separate argument — different bug, same family ("shell semantics changed under me").
+- **Kubernetes Pod `command` arrays vs `args`** flatten differently across kubectl client versions.
+- **AWS Step Functions / Lambda's `Pass` state** — JSON-encoded multi-line strings have idiosyncratic escape handling per region/runtime version.
+
+**Tradeoffs:** Keeping abilities as single-line bash is less readable (long lines, harder to diff, inline comments cramped). Investing in a Caldera 5.x upgrade or pre-render hook is more correct architecturally. Phase 21.5 picks the cheap workaround because Caldera 4.2.0 is a frozen pin and the alternative (debugging upstream) was out of scope. If we ever upgrade Caldera, the workaround should be tested and likely removed — the YAMLs can revert to the readable multi-line form.
+
+**Related entries:** [MITRE Caldera adversary emulation](#mitre-caldera-adversary-emulation) · [Caldera atomic planner — facts, fact sources, deadman links](#caldera-atomic-planner--facts-fact-sources-deadman-links) · [Idempotent PUT-by-id (REST upsert pattern)](#idempotent-put-by-id-rest-upsert-pattern) · [Coverage scorecard methodology](#coverage-scorecard-methodology)
 
 ---
 

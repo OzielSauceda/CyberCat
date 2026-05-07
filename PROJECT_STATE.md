@@ -6,17 +6,73 @@ Living status document. Update as reality changes. Short, current, honest.
 
 ## ⏯ Pick up next session
 
-> **Session paused 2026-05-07 with Phase 21.5 shipped + iterated (this branch, 5 commits).** Three rigging helpers landed plus 4 bug fixes caught during validation: (1) `scorer.py` deadman-overwrites-real-status, (2) Caldera 4.2.0 newline-strip mangle in `linux_file_burst_encrypt`, (3) same bug producing false-positive successes in `linux_creds_aws_read` + `linux_useradd_persist`, (4) Caldera 60s link-timeout on the file_burst loop. Two full Caldera re-runs (operations `6994c565` then `1fe6440a`) measured: ability errors **14 → 6 → 5**, gaps **3 → 10 → 11** (expected to land at errors 4 / gaps 12 after the timeout fix). Coverage stayed at 0/17 — gated by an even-deeper-than-expected kernel constraint: **the WSL2 kernel ships with `CONFIG_AUDIT` but WITHOUT `CONFIG_AUDITSYSCALL`** (verified by `/proc/sys/kernel/audit_enabled` being absent). No `cap_add` or `--privileged` setting on lab-debian will produce execve events on this kernel — the syscall-tracing code isn't compiled in. Real validation requires a Linux VM, an eBPF-based replacement for auditd, or synthetic injection. See `docs/phase-21.5-summary.md` "Verification" for the full four-option tree.
+**Session paused 2026-05-07.** Phase 21.5 done, 5 commits on `phase-21.5-caldera-rigging`. Stack still up unless you `docker compose down`.
 
-> **Branch ancestry (as of this commit):**
-> - `origin/main` → `cfbae8e` (post-v1.0)
-> - `phase-21-caldera-emulation` (8 commits, local) → branch base for both 21.5 and 22
-> - `phase-22-lotl-detection` (1 commit, local) → Phase 22 (LotL detection W1-W6)
-> - `phase-21.5-caldera-rigging` (this branch) → Phase 21.5 rigging fixes, branched off phase-21
->
-> **Below this divider:** original phase-21 narrative — preserved verbatim because phase-21 itself is not yet merged. Skim if you need the phase-21 backstory; otherwise skip to `docs/phase-21.5-summary.md`.
+### Status at a glance
+
+| Phase | Status | Branch | Commits |
+|---|---|---|---|
+| 19 → 20 | ✅ shipped to main | merged | tagged `v1.0` |
+| 21 (Caldera adversary emulation) | 🟡 local-only | `phase-21-caldera-emulation` | 8 |
+| 22 (LotL detection W1-W6) | 🟡 local-only | `phase-22-lotl-detection` | 1 |
+| **21.5 (Caldera rigging fixes)** | **🟡 local-only, this session** | **`phase-21.5-caldera-rigging`** | **5** |
+| 23 (UEBA) | ❌ not started | — | — |
+
+`origin/main` is at `cfbae8e` (post-v1.0); the three local branches diverged from there.
+
+### What Phase 21.5 actually shipped
+
+Three operator-tooling helpers under `labs/caldera/`:
+
+- `upload_custom_abilities.py` — `PUT /api/v2/abilities/{id}` for each `abilities/*.yml`, idempotent
+- `seed_fact_source.py` + `facts.yml` — `PUT /api/v2/sources/{id}` with realistic lab values
+- `build_operation_request.py` — operation payload now references `cybercat-phase21` instead of empty `basic`
+
+Plus four bug fixes caught **during validation** (not from upfront design):
+
+1. **`scorer.py` deadman-overwrites real status** — Caldera fires post-op cleanup links that often end UNTRUSTED (-3); `ran[aid] = step` later-wins was overwriting real status=0 successes. Fixed: status-priority order (0 > 1 > -3 > unknown).
+2. **Caldera 4.2.0 newline-strip** — multi-line YAML block scalars (`|`) get joined into one line *without separators* during dispatch. Killed `linux_file_burst_encrypt` outright; silently mangled `linux_creds_aws_read` (heredoc) and `linux_useradd_persist` (if-block) into false-positive status=0. Fixed: rewrote 3 customs as single-line `;`-separated bash.
+3. **60s default link timeout** — `linux_file_burst_encrypt`'s 30 × `sleep 2` loop tripped Caldera's per-link timeout once it actually ran. Fixed: `sleep 1` + `timeout: 120` on the executor.
+4. **WSL2 kernel lacks `CONFIG_AUDITSYSCALL`** — empirical dead-end, not a fix. `/proc/sys/kernel/audit_enabled` is absent inside the container. The kernel binary doesn't have execve-tap code. No `cap_add` / `--privileged` setting will produce process events on Docker Desktop on Windows. Documented and reverted the experimental cap_add change.
+
+### The validation numbers
+
+| Metric | Phase 21 baseline | After Phase 21.5 (2 cycles) | Expected after timeout fix |
+|---|---|---|---|
+| ability errors | **14** | **5** | **4** |
+| gaps (ran cleanly, no detector fired) | **3** | **11** | **12** |
+| false-negatives | 0 | 1 | 1 |
+| covered | 0 | 0 | 0 (gated by missing `CONFIG_AUDITSYSCALL`) |
+
+**9 of 14 ability errors closed.** The remaining 4 are stockpile abilities with hardcoded literals (`ARTUser`, `victim-host`, `$USERNAME`, `netstat -o` on Linux) — stockpile-fork territory, not Phase 21.5.
+
+### Three real options for next session
+
+| Option | Effort | What it gets you |
+|---|---|---|
+| **Push + PR all three branches** | ~30 min | Phase 21 → main, rebase 21.5 → main, rebase 22 → main, tag `v1.1`. Closes the local-only-branch backlog. Modifies shared GitHub state. |
+| **Build the auditd replacement** (eBPF or synthetic injection or Linux VM via Multipass) | 15 min — 2 days depending on path | Unblocks the 0/17 → real-coverage scorecard. See `docs/phase-21.5-summary.md` "Verification" for the full 4-option tree. |
+| **Move on to Phase 23 (UEBA)** | several sessions | Slow-and-low statistical baselining. Bigger scope. The validation gap stays open. |
+
+### To bring the stack back up
+
+```powershell
+cd C:\Users\oziel\OneDrive\Desktop\CyberCat
+docker compose -f infra\compose\docker-compose.yml --profile agent --profile caldera up -d
+docker compose -f infra\compose\docker-compose.yml exec -T backend alembic current   # expect: 0011 (head)
+```
+
+(Frontend may fail on port 3000 — that's a separate issue, doesn't block Caldera work.)
+
+### Pickup-doc pointers
+
+- `docs/phase-21.5-summary.md` — full Phase 21.5 outcome: 3-cycle comparison table, 4-option auditd tree, file inventory
+- `docs/learning-notes.md` — durable concept reference (Caldera atomic planner entry refreshed; new entries: idempotent PUT-by-id, `CONFIG_AUDIT` vs `CONFIG_AUDITSYSCALL`, Caldera 4.2.0 newline-strip)
+- `docs/phase-19-to-22-recap.md` — **lives only on `phase-22-lotl-detection` branch**, not this one. Its "Phase 21.5 — what's planned (NOT YET BUILT)" section is now stale (we shipped + iterated). When you next visit phase-22 or do the merges, append a "what actually happened" subsection there. Outline of what to add is captured in `docs/phase-21.5-summary.md`.
 
 ---
+
+## (Below this line: pre-Phase-21.5 narrative — preserved verbatim)
 
 > **Original phase-21 status (preserved, 2026-05-06):** Pipeline ran end-to-end on the operator's laptop; scorecard generated; pytest 257/257 green; nothing committed yet. Stack is up. The next task is committing the working tree as `phase-21 D4` and then planning Phase 22. **Phase 22 first, Phase 21.5 second** — that sequencing was decided this session and is captured in ADR-0016 §I.
 

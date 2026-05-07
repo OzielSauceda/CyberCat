@@ -117,6 +117,20 @@ Phase 21.5 adds two helpers and a declarative facts file to fix the rigging halv
 
 `build_operation_request.py` was updated in lock-step: the operation payload's `source.name` is now `cybercat-phase21` (configurable via `--source`) instead of the empty default `basic`.
 
+## Known Caldera 4.2.0 quirks (post-Phase-21.5)
+
+Three gotchas that any future ability author needs to know about. See `docs/phase-21.5-summary.md` and `docs/learning-notes.md` for the full diagnostic stories.
+
+- **Newlines are silently stripped from multi-line commands.** A YAML block scalar (`|`) like `mkdir -p /tmp/loot\nfor i in $(seq 1 30); do` becomes `mkdir -p /tmp/lootfor i in $(seq 1 30); do` at dispatch time. Bash treats that as `mkdir -p /tmp/lootfor` followed by a syntax error. **Workaround:** write multi-statement abilities as a single line with explicit `;` separators. The 5 customs in `abilities/` follow this pattern after Phase 21.5; new customs should too. `linux_lateral_ssh` and `linux_curl_pipe_sh` get away with multi-line YAML because their effective code is one statement preceded by comments — the comments fuse into one harmless `# ... # ...` line and bash ignores it.
+- **The default per-link timeout is 60 seconds.** Loops with `sleep` quickly exceed it. Add `timeout: 120` (or higher) on the executor when authoring an ability that takes more than a few seconds. `linux_file_burst_encrypt` does this — see its YAML for the inline rationale.
+- **Cleanup links can leave deadman entries in `UNTRUSTED` (-3) state.** The pre-Phase-21.5 scorer's `ran[aid] = step` later-wins logic let those overwrite the real run's status=0. Fixed in `scorer.py` by picking the entry with the best status priority (0 > 1 > -3 > unknown) per ability.
+
+## auditd-on-Windows constraint (post-Phase-21.5)
+
+Real Caldera-driven coverage validation requires process events from the lab. On Docker Desktop on Windows, `auditd` does not produce events because **the WSL2 kernel was built with `CONFIG_AUDIT` but without `CONFIG_AUDITSYSCALL`** — the syscall-tap subsystem is not in the kernel binary. No `cap_add` or `--privileged` setting on `lab-debian` will fix this; it's a kernel-build-time decision Microsoft made.
+
+Diagnostic: inside `lab-debian`, run `cat /proc/sys/kernel/audit_enabled`. If the file does not exist, you are on a kernel without `CONFIG_AUDITSYSCALL` and no audit rules will ever fire. See `docs/learning-notes.md` "Linux kernel CONFIG_AUDIT vs CONFIG_AUDITSYSCALL" for the full story and the four-option fix tree (synthetic injection / Linux VM / eBPF / accept Linux-only).
+
 ## Operator gotchas
 
 - **Stockpile UUIDs change between Caldera versions.** `build_operation_request.py --resolve-uuids` writes a `expectations.resolved.yml` sidecar that the runner reads. Re-run resolution after any `CALDERA_VERSION` bump.
