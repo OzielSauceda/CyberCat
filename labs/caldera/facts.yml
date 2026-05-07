@@ -1,0 +1,92 @@
+# labs/caldera/facts.yml — Phase 21.5 fact source definition.
+#
+# This file is the source of truth for the CyberCat fact source. The
+# `seed_fact_source.py` helper reads this file and PUTs its contents to
+# Caldera's /api/v2/sources/{source_id} (idempotent). Caldera then
+# resolves `#{trait}` template references in stockpile ability commands
+# against these facts at link-creation time.
+#
+# Why this file exists: Phase 21's first scorecard had 9 ability rows
+# error out because the default `basic` fact source shipped with
+# stockpile is essentially empty, so abilities templated against
+# `#{host.user.name}`, `#{remote.host.fqdn}`, etc. couldn't substitute.
+#
+# Extending this file:
+#   - When a re-run of `bash labs/caldera/run.sh` shows an ability still
+#     erroring on a missing fact, find the trait name in Caldera's
+#     stockpile YAML (inside the caldera container at
+#     /usr/src/app/plugins/stockpile/data/abilities/...) and add it
+#     here.
+#   - Trait names are dot-delimited and conventional (Caldera does NOT
+#     enforce a schema). Common namespaces: host.*, remote.host.*,
+#     file.*, user.*, network.*, payload.*.
+#   - Re-run `python -m labs.caldera.seed_fact_source` after any edit;
+#     the source is upserted by id so changes apply immediately.
+#
+# Determinism note: every fact value is hardcoded. A regression
+# scorecard wants identical inputs across runs; we trade entropy for
+# reproducibility. Phase 23+ may add randomized-fact runs for
+# diversity testing as a separate mode.
+
+source_id: cybercat-phase21
+source_name: cybercat-phase21
+description: |
+  CyberCat Phase 21+ fact source. Mirrors lab-debian's static runtime
+  state (realuser, /tmp scratch, host-mine.lab.local peer) so stockpile
+  abilities templated against #{trait} substitute predictably during
+  the coverage scorecard run.
+
+facts:
+  # ---- host identity (most-used in stockpile) ----
+  - trait: host.user.name
+    value: realuser
+  - trait: host.user.home
+    value: /home/realuser
+  - trait: host.user.password
+    value: phase21WrongPassword
+  - trait: host.user.shell
+    value: /bin/bash
+
+  # ---- filesystem targets ----
+  - trait: host.dir.compromise
+    value: /tmp
+  - trait: host.dir.staging
+    value: /tmp/staging
+  - trait: host.file.target
+    value: /tmp/loot.tar.gz
+  - trait: file.sensitive.extension
+    value: pdf
+  - trait: file.sensitive.path
+    value: /etc/passwd
+
+  # ---- remote pivot target (for SCP exfil + lateral movement) ----
+  - trait: remote.host.fqdn
+    value: host-mine.lab.local
+  - trait: remote.host.ip
+    value: 10.99.99.99
+  - trait: remote.host.username
+    value: realuser
+  - trait: remote.host.port
+    value: "22"
+  - trait: remote.host.path
+    value: /tmp/exfil.tar.gz
+
+  # ---- persistence artefact names ----
+  - trait: host.systemd.service.name
+    value: cct-phase21-test
+  - trait: host.cron.script.path
+    value: /etc/cron.d/cct-phase21-test
+  - trait: host.cron.command
+    value: "* * * * * root /bin/true"
+
+  # ---- archive / staging filenames ----
+  - trait: archive.name
+    value: phase21-loot.tar.gz
+  - trait: archive.dir
+    value: /tmp/staging
+
+  # ---- credentials / passwd-change targets ----
+  - trait: target.user
+    value: realuser
+  - trait: target.password.new
+    value: phase21NewPassword

@@ -31,6 +31,9 @@ labs/caldera/
 │   ├── linux_creds_aws_read.yml     ← T1552.001
 │   └── linux_useradd_persist.yml    ← T1098
 ├── build_operation_request.py       ← payload assembler + UUID resolver
+├── upload_custom_abilities.py       ← (Phase 21.5) PUT abilities/*.yml to Caldera stockpile
+├── seed_fact_source.py              ← (Phase 21.5) PUT fact source from facts.yml
+├── facts.yml                        ← (Phase 21.5) declarative facts the seeder uploads
 ├── run.sh                           ← orchestrator (preflight → operation → scorer)
 └── scorer.py                        ← coverage-status logic + markdown/JSON renderer
 ```
@@ -45,12 +48,32 @@ bash start.sh --profile agent --profile caldera
 docker compose -f infra/compose/docker-compose.yml exec -T backend \
     python -m labs.caldera.build_operation_request --resolve-uuids
 
-# 3. Run the full curated profile and produce the scorecard.
+# 3. (Phase 21.5 — first run after any abilities/*.yml or facts.yml edit)
+#    Upload the 5 custom abilities into Caldera's stockpile.
+docker compose -f infra/compose/docker-compose.yml exec -T \
+    -e CALDERA_API_KEY="$(grep '^CALDERA_API_KEY=' infra/compose/.env | cut -d= -f2-)" \
+    backend python -m labs.caldera.upload_custom_abilities \
+        --caldera "http://caldera:8888" --here "//app/labs/caldera"
+
+# 4. (Phase 21.5 — same trigger) Seed the CyberCat fact source so
+#    stockpile abilities templated against #{trait} can substitute.
+docker compose -f infra/compose/docker-compose.yml exec -T \
+    -e CALDERA_API_KEY="$(grep '^CALDERA_API_KEY=' infra/compose/.env | cut -d= -f2-)" \
+    backend python -m labs.caldera.seed_fact_source \
+        --caldera "http://caldera:8888" --here "//app/labs/caldera"
+
+# 5. Run the full curated profile and produce the scorecard.
 bash labs/caldera/run.sh
 
-# 4. Read the result.
+# 6. Read the result.
 less docs/phase-21-scorecard.md
 ```
+
+Steps 3 + 4 are **idempotent** — both helpers PUT-by-id, so re-running
+them simply replaces the prior version. Run them once after any
+`abilities/*.yml` or `facts.yml` edit; the `run.sh` orchestrator does
+not re-invoke them automatically (operator-controlled by design — they
+mutate Caldera's persistent stockpile/sources, not just per-run state).
 
 ## Status enum (per row of the scorecard)
 
@@ -77,8 +100,27 @@ attributions are preferable to missed ones for the v1 scorecard.
 - It does not deduplicate detections across multiple operations. Re-running
   `run.sh` overwrites the scorecard with the latest run's window.
 
+## Phase 21.5 helpers — closing the rigging gaps
+
+The first scorecard ran 0/17 covered. The recap doc breaks the failures into:
+
+- **5 ability-skipped** — custom abilities (`linux_lateral_ssh`, `linux_curl_pipe_sh`, `linux_file_burst_encrypt`, `linux_creds_aws_read`, `linux_useradd_persist`) that lived in `abilities/*.yml` but were never uploaded to Caldera's stockpile.
+- **9 ability-failed** — Stockpile abilities that errored mid-execution because `#{trait}` template references couldn't substitute against the empty default `basic` fact source.
+- **3 honest gaps** — abilities that ran cleanly but no detector fired (Phase 22's input list).
+
+Phase 21.5 adds two helpers and a declarative facts file to fix the rigging halves:
+
+| Helper | What it does | Idempotent | Re-run when |
+|---|---|---|---|
+| `upload_custom_abilities.py` | Reads `abilities/*.yml`, transforms each into Caldera's API shape, `PUT /api/v2/abilities/{id}`. Verifies via GET. | ✓ (PUT-by-id) | After editing any `abilities/*.yml`. |
+| `seed_fact_source.py` | Reads `facts.yml`, builds a Caldera fact-source payload, `PUT /api/v2/sources/{id}`. | ✓ (PUT-by-id) | After editing `facts.yml`. |
+
+`build_operation_request.py` was updated in lock-step: the operation payload's `source.name` is now `cybercat-phase21` (configurable via `--source`) instead of the empty default `basic`.
+
 ## Operator gotchas
 
 - **Stockpile UUIDs change between Caldera versions.** `build_operation_request.py --resolve-uuids` writes a `expectations.resolved.yml` sidecar that the runner reads. Re-run resolution after any `CALDERA_VERSION` bump.
 - **Sandcat enrollment is fetch-on-start.** With both `--profile agent` and `--profile caldera` brought up simultaneously, `lab-debian` may try to fetch Sandcat before Caldera's 60s `start_period` elapses. The first `start.sh` run will still print PASS for the four core checks, but re-run after ~90s if `pgrep sandcat` is empty.
 - **Cleanup discipline.** Every custom ability YAML carries a `cleanup` block. Without cleanup, `lab-debian` accumulates artifacts (e.g. `.encrypted` files, the `backdoor` user) across runs and the scorecard becomes non-reproducible. If you author a new ability, write its cleanup at the same time.
+- **Custom abilities and facts must be re-uploaded after Caldera-container restarts.** Caldera 4.2.0 persists abilities/sources to its on-disk store, but a `down -v` (volume wipe) drops them. Re-running `upload_custom_abilities.py` + `seed_fact_source.py` is cheap and idempotent — make it muscle memory.
+- **Facts that don't substitute fail silently per-link.** If a stockpile ability references a trait we haven't declared (e.g. a `#{user.password}` variant), the link errors mid-execution and shows up as `ability-failed` in the scorecard. Read the Caldera operation report (`labs/caldera/.tmp/caldera-op-*.json`) and grep for `Missing fact` to find missing trait names; add them to `facts.yml` and re-run the seeder.

@@ -93,6 +93,7 @@ Each entry follows the same shape:
 - [Caldera atomic planner — facts, fact sources, deadman links](#caldera-atomic-planner--facts-fact-sources-deadman-links)
 - [Git Bash MSYS path translation](#git-bash-msys-path-translation)
 - [PAM authentication failure surface (sshd vs sudo vs su)](#pam-authentication-failure-surface-sshd-vs-sudo-vs-su)
+- [Idempotent PUT-by-id (REST upsert pattern)](#idempotent-put-by-id-rest-upsert-pattern)
 
 ### Verification
 - [Smoke tests vs unit tests vs integration tests](#smoke-tests-vs-unit-tests-vs-integration-tests)
@@ -4060,7 +4061,7 @@ The diagnostic technique was straight from CLAUDE.md §9 "debugging as a teachin
 ---
 
 ## Caldera atomic planner — facts, fact sources, deadman links
-*Introduced: Phase 21 (Day-2)* · *Category: Detection*
+*Introduced: Phase 21 (Day-2)* · *Updated: Phase 21.5* · *Category: Detection*
 
 **Intuition:** Caldera's "atomic planner" is the simplest of its planners — go through your ability list in order, run each on the agent, move on. But Caldera abilities aren't pure shell commands; they're parameterized templates. A `find` ability says "run `find / -name '*.#{file.sensitive.extension}'`" — Caldera substitutes the placeholder from a *fact source* before dispatching. If the fact source doesn't have that fact, the planner skips the ability silently. After every ability, the planner also fires a *deadman link* — a cleanup command — and if that runs before the ability's effects are observable (e.g. before 4 brute-force failures land in `auth.log`), you don't get the detection signal.
 
@@ -4084,13 +4085,15 @@ The brute-force loop tries 5–10 wrong passwords serially over a few seconds. P
 
 **Why it exists:** Caldera's design optimizes for *ability isolation* — each ability cleans up after itself so subsequent abilities run against a known state. Without strict cleanup, `lab-debian` accumulates artifacts (extra users, stray files, modified configs) and the scorecard becomes irreproducible. The deadman link is the enforcement mechanism. The cost is the time-window race we hit: detection events generated *during* the ability haven't fully propagated to the SIEM by the time the cleanup fires.
 
-**Where in CyberCat:** Atomic planner is selected at operation creation in `labs/caldera/build_operation_request.py:382` (`"planner": {"id": planner_id}`). Fact source is `"source": {"name": "basic"}` — empty by default. **Phase 21.5 will add:** a `labs/caldera/fact_source.yml` registered via `POST /api/v2/sources` with realistic lab values (`host.user.name=realuser`, `file.sensitive.extension=pdf`), and an investigation of whether to disable cleanup for time-window abilities or pick brute-force variants whose cleanup doesn't race.
+**Where in CyberCat:** Atomic planner is selected at operation creation in `labs/caldera/build_operation_request.py` (`"planner": {"id": planner_id}`). Fact source name is the `--source` CLI arg, defaulting to `cybercat-phase21` (the constant `DEFAULT_SOURCE_NAME` near the top of the file). The source itself is declared in `labs/caldera/facts.yml` and uploaded by `labs/caldera/seed_fact_source.py` (PUT `/api/v2/sources/{id}`). Custom abilities (`abilities/*.yml`) are uploaded by `labs/caldera/upload_custom_abilities.py` (PUT `/api/v2/abilities/{id}`). Both helpers are idempotent — re-run after any edit. See the README "Phase 21.5 helpers" section.
+
+**Phase 21.5 outcome (2026-05-07):** the rigging halves of the failure mix are addressed. The deadman-race investigation specifically (Task 3 in the recap doc) was deferred — static analysis showed the 5 custom abilities all have explicit cleanup blocks that run *after* the agent has already emitted events, and the 9 ability-failed rows look like fact-substitution misses (`-3` UNTRUSTED for Sandcat drops, `1+` exit-code for runtime errors), not cleanup races. If the post-Phase-21.5 re-run still shows specific abilities fire-then-rollback before detection, *then* fork the brute-force ability with a `cleanup_delay_s` knob. Don't pre-build for a problem that may not materialize.
 
 **Where else you'll see it:** Atomic Red Team's `.yaml` invocations have the same fact-substitution pattern (`{{prerequisites}}`, `{{cleanup}}`). Ansible's `roles` are conceptually similar — declarative tasks with input variables, run in order, with handlers for cleanup. Make/Bazel/Nix all have build-time variable substitution. The deadman concept exists in Kubernetes Pod terminationGracePeriod (the cleanup window before forced kill).
 
-**Tradeoffs:** Strict cleanup = clean state between abilities = race-prone for time-window detectors. Relaxed cleanup = drift accumulates over a 17-ability operation. The right call depends on the detector class: state-based detectors (a user exists / a file exists) need cleanup; time-window detectors (4-failures-in-60s) need cleanup *deferred*. Caldera doesn't expose a per-ability cleanup-delay knob; Phase 21.5 will likely fork the brute-force ability to add one.
+**Tradeoffs:** Strict cleanup = clean state between abilities = race-prone for time-window detectors *if the agent flush hasn't happened yet*. Relaxed cleanup = drift accumulates over a 17-ability operation. The right call depends on the detector class: state-based detectors (a user exists / a file exists) need cleanup; time-window detectors (4-failures-in-60s) need cleanup *deferred*. Caldera 4.2.0 doesn't expose a per-ability cleanup-delay knob — adding one would be a fork of the brute-force ability with `sleep N` before the cleanup line. Phase 21.5 deferred this until empirical evidence demands it.
 
-**Related entries:** [MITRE Caldera adversary emulation](#mitre-caldera-adversary-emulation) · [Coverage scorecard methodology](#coverage-scorecard-methodology) · [Fetch-on-start agent enrollment](#fetch-on-start-agent-enrollment)
+**Related entries:** [MITRE Caldera adversary emulation](#mitre-caldera-adversary-emulation) · [Coverage scorecard methodology](#coverage-scorecard-methodology) · [Fetch-on-start agent enrollment](#fetch-on-start-agent-enrollment) · [Idempotent PUT-by-id (REST upsert pattern)](#idempotent-put-by-id-rest-upsert-pattern)
 
 ---
 
@@ -4166,4 +4169,50 @@ CyberCat's `auth_failed_burst.py` detector keys on `sshd[<pid>]:` as the syslog 
 
 ---
 
-*End of entries — coverage of Phases 1–21. New concepts will be appended as they come up in future sessions; existing entries will be updated in place if a topic gets revisited in greater depth.*
+## Idempotent PUT-by-id (REST upsert pattern)
+*Introduced: Phase 21.5* · *Category: Project Pattern*
+
+**Intuition:** When you want a script you can re-run safely without first asking "does this already exist?", design (or use) a REST endpoint that takes the resource's identifier in the URL path and accepts `PUT`. The server treats the call as "create-or-replace at this key." Same effect as `ON CONFLICT DO UPDATE` in SQL or `redis SET` (always overwrites), but at the HTTP layer.
+
+**Precise:** Per RFC 9110 §9.3.4, `PUT` "requests that the state of the target resource be created or replaced with the state defined by the representation enclosed in the request message content." This is in deliberate contrast to `POST` (server picks the URL of the newly-created resource). PUT-by-id requires the client to own the resource's identifier — so the client picks `linux_lateral_ssh` as an ability_id, the YAML's `id:` field is the source of truth, and the URL path `/api/v2/abilities/linux_lateral_ssh` is the addressable handle. Idempotency follows directly from the spec: PUT N times with the same body has the same observable effect as PUT once. POST N times creates N resources.
+
+**Why it exists:** Without PUT-by-id, "ensure resource X exists with this content" requires a *search → diff → create-or-update* dance:
+
+```python
+existing = GET /api/v2/things?name=foo
+if existing:
+    if existing.body != desired:
+        DELETE /api/v2/things/{existing.id}
+        POST /api/v2/things  # create
+else:
+    POST /api/v2/things
+```
+
+That dance has TOCTOU (time-of-check-to-time-of-use) hazards under concurrent callers — between the GET and the POST, another caller can create the same resource. It's also verbose and easy to get wrong. PUT-by-id collapses the whole sequence to one call: `PUT /api/v2/things/foo` with the desired body, server figures out the rest.
+
+**Where in CyberCat:**
+
+- `labs/caldera/upload_custom_abilities.py` — `_caldera_request(url, key, method="PUT", payload=payload)` against `/api/v2/abilities/{ability_id}`. Re-running after editing `abilities/*.yml` simply replaces the prior version.
+- `labs/caldera/seed_fact_source.py` — `PUT /api/v2/sources/{source_id}`. Same idiom for the fact source.
+- Compare `labs/caldera/build_operation_request.py:225` (the older adversary-upsert dance: search by name → delete-and-recreate if stale → create from scratch). That code predates Phase 21.5 and works, but it's three round-trips with race-window semantics. The Phase 21.5 helpers are one round-trip with idempotent-by-id semantics. Both end up at the same place; the new pattern is cleaner.
+
+**Where else you'll see it:**
+
+- **Kubernetes**: `kubectl apply -f thing.yaml` defaults to PUT-style server-side apply for known kinds. The resource's `metadata.name` is the ID.
+- **AWS S3**: `PUT /<bucket>/<key>` overwrites by key, no questions asked.
+- **Stripe**: most resources support both `POST /v1/customers` (create with new ID) and `POST /v1/customers/{id}` (idempotency-key-style upsert with client-chosen ID via the `Idempotency-Key` header).
+- **Terraform**: the entire reconciliation loop is this pattern at infrastructure scale — declared state in HCL + reconcile to match.
+- **Caddy / Traefik dynamic-config APIs**: PUT-by-id for live route updates without rebuild.
+
+**Tradeoffs:**
+
+- *Client owns the ID space.* You have to pick stable IDs that won't collide. In our case the YAML `id:` field is the source of truth — that's a deliberate choice, not free.
+- *Last-write-wins is the only conflict model.* If two operators race on the same `linux_lateral_ssh` ability with different bodies, one body silently overwrites the other. That's fine for our solo-operator case; for collaborative APIs you layer optimistic concurrency control on top via `If-Match: <etag>`.
+- *Server has to support it.* Caldera 4.2.0 does (`PUT /api/v2/abilities/{ability_id}` is a documented route). Some legacy APIs only expose POST-create + PATCH-update; for those you fall back to the search-and-update dance.
+- *Cosmetic but real:* PUT-by-id requires the client to URL-encode the ID. Caldera's IDs are alphanumeric-with-dashes, so this never bites us — but if you used a UUID or a slug with `/` in it, you'd need encoding.
+
+**Related entries:** [ON CONFLICT DO UPDATE / DO NOTHING (upserts and idempotent inserts)](#on-conflict-do-update--do-nothing-upserts-and-idempotent-inserts) · [SETNX (set-if-not-exists) for dedup](#setnx-set-if-not-exists-for-dedup) · [Caldera atomic planner — facts, fact sources, deadman links](#caldera-atomic-planner--facts-fact-sources-deadman-links)
+
+---
+
+*End of entries — coverage of Phases 1–21.5. New concepts will be appended as they come up in future sessions; existing entries will be updated in place if a topic gets revisited in greater depth.*

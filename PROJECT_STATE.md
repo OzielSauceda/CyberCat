@@ -6,7 +6,19 @@ Living status document. Update as reality changes. Short, current, honest.
 
 ## ⏯ Pick up next session
 
-> **Session paused 2026-05-06 with Phase 21 first-run COMPLETE.** Pipeline ran end-to-end on the operator's laptop; scorecard generated; pytest 257/257 green; nothing committed yet. Stack is up. The next task is committing the working tree as `phase-21 D4` and then planning Phase 22. **Phase 22 first, Phase 21.5 second** — that sequencing was decided this session and is captured in ADR-0016 §I.
+> **Session paused 2026-05-07 with Phase 21.5 code complete (this branch).** Three rigging helpers landed under `labs/caldera/`: `upload_custom_abilities.py`, `seed_fact_source.py`, and the declarative `facts.yml`. `build_operation_request.py` now references `cybercat-phase21` instead of the empty `basic` source. Task 3 (cleanup-deadman) deferred — see `docs/phase-21.5-summary.md` for the static-analysis reasoning. **No code-validation needed in CI** (helpers are operator tooling, no backend Python touched). **The closing-of-the-loop validation is a scorecard re-run**: `bash labs/caldera/run.sh` after running the new helpers — target ≥12/17 covered, vs 0/17 at Phase 21 baseline.
+
+> **Branch ancestry (as of this commit):**
+> - `origin/main` → `cfbae8e` (post-v1.0)
+> - `phase-21-caldera-emulation` (8 commits, local) → branch base for both 21.5 and 22
+> - `phase-22-lotl-detection` (1 commit, local) → Phase 22 (LotL detection W1-W6)
+> - `phase-21.5-caldera-rigging` (this branch) → Phase 21.5 rigging fixes, branched off phase-21
+>
+> **Below this divider:** original phase-21 narrative — preserved verbatim because phase-21 itself is not yet merged. Skim if you need the phase-21 backstory; otherwise skip to `docs/phase-21.5-summary.md`.
+
+---
+
+> **Original phase-21 status (preserved, 2026-05-06):** Pipeline ran end-to-end on the operator's laptop; scorecard generated; pytest 257/257 green; nothing committed yet. Stack is up. The next task is committing the working tree as `phase-21 D4` and then planning Phase 22. **Phase 22 first, Phase 21.5 second** — that sequencing was decided this session and is captured in ADR-0016 §I.
 
 **Where `main` is:** `11778e3` on `origin/main`. `v1.0` tag pushed. Untouched.
 **Working branch:** `phase-21-caldera-emulation` — six original commits + a substantial uncommitted working tree (Day-2 4.2.0 pivot fixes + the first scorecard). Not yet pushed, not yet merged.

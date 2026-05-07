@@ -34,6 +34,12 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+# Default Caldera fact source the operation payload references. Phase 21.5
+# replaces the empty stockpile default `basic` with a CyberCat-managed
+# source seeded from labs/caldera/facts.yml via seed_fact_source.py.
+# Override via --source on the CLI.
+DEFAULT_SOURCE_NAME = "cybercat-phase21"
+
 # ---------------------------------------------------------------------------
 # Tiny YAML reader — handles only what profile.yml + expectations.yml use.
 # We avoid the PyYAML dependency so this script can run anywhere.
@@ -313,7 +319,7 @@ def resolve_uuids(here: Path, caldera_url: str, key: str) -> int:
     return 0
 
 
-def build_payload(here: Path, caldera_url: str, key: str, group: str) -> int:
+def build_payload(here: Path, caldera_url: str, key: str, group: str, source: str) -> int:
     """Print the operation-creation payload to stdout. The caller pipes
     this into curl -d @-."""
     # Prefer resolved sidecars; fall back to source files.
@@ -413,7 +419,11 @@ def build_payload(here: Path, caldera_url: str, key: str, group: str) -> int:
         "name": f"{name} run",
         "adversary": {"adversary_id": adv_id},
         "planner": {"id": planner_id},
-        "source": {"name": "basic"},  # default fact source ships with stockpile
+        # Phase 21.5: name of a CyberCat-seeded fact source (see
+        # labs/caldera/facts.yml + seed_fact_source.py). The stockpile's
+        # default `basic` source is empty and broke 9 stockpile abilities
+        # in the Phase 21 first run.
+        "source": {"name": source},
         "auto_close": True,
         "state": "running",
         "obfuscator": "plain-text",
@@ -432,6 +442,9 @@ def main() -> int:
                    help="Caldera API key. Falls back to CALDERA_API_KEY env var.")
     p.add_argument("--group", default="red",
                    help="Sandcat agent group to target (default 'red').")
+    p.add_argument("--source", default=DEFAULT_SOURCE_NAME,
+                   help=f"Caldera fact source name (default '{DEFAULT_SOURCE_NAME}'). "
+                        f"Must be seeded first via labs/caldera/seed_fact_source.py.")
     p.add_argument("--here", default=str(Path(__file__).resolve().parent),
                    help="labs/caldera/ directory (default: this script's parent).")
     args = p.parse_args()
@@ -446,7 +459,7 @@ def main() -> int:
     here = Path(args.here)
     if args.resolve_uuids:
         return resolve_uuids(here, args.caldera, key)
-    return build_payload(here, args.caldera, key, args.group)
+    return build_payload(here, args.caldera, key, args.group, args.source)
 
 
 if __name__ == "__main__":
