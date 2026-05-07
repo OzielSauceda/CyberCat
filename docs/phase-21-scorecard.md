@@ -1,8 +1,8 @@
 # Phase 21 — Coverage Scorecard
 
-_Generated 2026-05-07T17:14:03+00:00 from Caldera operation `6994c565-fe7d-4793-a8c4-b29359ca338c`._
+_Generated 2026-05-07T17:46:43+00:00 from Caldera operation `1fe6440a-d368-4036-a3d9-69175d76a709`._
 
-**Summary:** covered **0** / 17  ·  gaps 10  ·  false-negatives 1  ·  unexpected hits 0  ·  ability errors 6
+**Summary:** covered **0** / 17  ·  gaps 11  ·  false-negatives 1  ·  unexpected hits 0  ·  ability errors 5
 
 Status enum: **covered** | **gap** | **false-negative** | **unexpected-hit** | **ability-failed** | **ability-skipped**. See `labs/caldera/README.md` for definitions.
 
@@ -17,12 +17,12 @@ Status enum: **covered** | **gap** | **false-negative** | **unexpected-hit** | *
 | 7 | curl | sh persistence | T1105 | 0 | `GAP` | — | **gap** |
 | 8 | SUDO brute-force | T1110.001 | 0 | `py.auth.failed_burst` | — | **false-negative** |
 | 9 | clean cred-theft + AWS creds read + login from new IP | T1078 | 0 | `GAP` | — | **gap** |
-| 10 | file-burst rename (30× .encrypted in 60s) | T1486 | 1 | `GAP` | — | **ability-failed** |
+| 10 | file-burst rename (30× .encrypted in 60s) | T1486 | 124 | `GAP` | — | **ability-failed** |
 | 11 | useradd backdoor account | T1098 | 0 | `GAP` | — | **gap** |
 | 12 | password change (passwd) | T1098 | 1 | `GAP` | — | **ability-failed** |
 | 13 | cron persistence (/etc/cron.d/...) | T1546.003 | 0 | `GAP` | — | **gap** |
 | 14 | bash history wipe | T1070.003 | 0 | `GAP` | — | **gap** |
-| 15 | tarball stage (data compressed) | T1560.001 | 1 | `GAP` | — | **ability-failed** |
+| 15 | tarball stage (data compressed) | T1560.001 | 0 | `GAP` | — | **gap** |
 | 16 | scp exfil (push) | T1048.002 | 1 | `GAP` | — | **ability-failed** |
 | 17 | systemd persistence (write .service file) | T1543.002 | 1 | `GAP` | — | **ability-failed** |
 

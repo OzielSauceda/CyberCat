@@ -20,9 +20,16 @@
         # which bash parses as `mkdir -p /tmp/lootfor` (a directory named
         # 'lootfor') and then the bare `for` clause is a syntax error.
         # Workaround: write the entire command as a single line with
-        # explicit `;` separators so newline-stripping is a no-op. The
-        # YAML stays readable by indenting parts with " ; ".
+        # explicit `;` separators so newline-stripping is a no-op.
+        #
+        # `timeout: 120` overrides Caldera's 60s default per-link timeout
+        # — the 30-iteration loop with `sleep 1` finishes in ~30-40s, but
+        # the original `sleep 2` would tip over the 60s default and the
+        # link returned exit code 124 (timeout). 30 file creations in
+        # ~30s still puts us comfortably above Phase 22's
+        # file_burst_detector threshold (20-in-60s).
+        timeout: 120
         command: |
-          mkdir -p /tmp/loot ; for i in $(seq 1 30) ; do touch "/tmp/loot/f${i}.txt" ; mv "/tmp/loot/f${i}.txt" "/tmp/loot/f${i}.txt.encrypted" ; sleep 2 ; done
+          mkdir -p /tmp/loot ; for i in $(seq 1 30) ; do touch "/tmp/loot/f${i}.txt" ; mv "/tmp/loot/f${i}.txt" "/tmp/loot/f${i}.txt.encrypted" ; sleep 1 ; done
         cleanup: |
           rm -rf /tmp/loot

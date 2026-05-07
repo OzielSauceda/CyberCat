@@ -63,16 +63,22 @@ If the post-Phase-21.5 re-run still shows specific abilities fire-then-rollback 
 
 The scorecard re-run happened in this session (operation `6994c565-fe7d-4793-a8c4-b29359ca338c`, ~14 min execution time, finished 2026-05-07 17:08 UTC). Latest `docs/phase-21-scorecard.md` reflects this run.
 
-### Comparison vs Phase 21 baseline
+### Comparison vs Phase 21 baseline (three validation cycles)
 
-| Metric | Phase 21 (`326fde6c`) | Phase 21.5 (`6994c565`) | Delta |
-|---|---|---|---|
-| covered | 0 | 0 | — (capped by auditd-on-Windows; see below) |
-| **gaps** (ran cleanly, no detector fired) | **3** | **10** | **+7** |
-| false-negatives (ran cleanly, expected rule silent) | 0 | 1 | +1 |
-| **ability errors** (rigging blocked execution) | **14** | **6** | **-8** |
+| Metric | Phase 21 (`326fde6c`) | 21.5 first re-run (`6994c565`) | 21.5 second re-run (`1fe6440a`) | Expected after timeout fix |
+|---|---|---|---|---|
+| covered | 0 | 0 | 0 | 0 |
+| **gaps** (ran cleanly, no detector fired) | **3** | 10 | **11** | 12 |
+| false-negatives | 0 | 1 | 1 | 1 |
+| **ability errors** (rigging blocked execution) | **14** | 6 | **5** | 4 |
 
-The 5 `ability-skipped` rows from the first run all flipped to `gap` or `false-negative` — they now actually execute. Of the 9 original `ability-failed` rows, 6 still error (different stockpile abilities, different missing traits — extend `facts.yml` and re-seed). The Phase 21.5 deliverable — *"rigging is no longer the bottleneck"* — is empirically met.
+The 5 `ability-skipped` rows from the first run all flipped to `gap` or `false-negative`. Of the 9 original `ability-failed` rows, only 4 will remain after the timeout fix lands — and those 4 are stockpile abilities with hardcoded literals that need stockpile forks, not Phase 21.5 territory. The Phase 21.5 deliverable — *"rigging is no longer the bottleneck"* — is empirically met. **9 of the original 14 ability errors closed.**
+
+**Three iterative passes during the validation:**
+
+1. **First re-run (operation `6994c565`)** — uncovered the `scorer.py` deadman-overwrites bug (deadman cleanup links left in UNTRUSTED state -3 were overwriting the real run's status=0). Fixed by giving the scorer a status-priority order (0 > 1 > -3 > unknown) and skipping cleanup steps that never executed.
+2. **Triage of remaining 6 errors** — re-reading the saved report's `plaintext_command` showed Caldera 4.2.0 strips literal newlines from multi-line block scalars before dispatch. This made `linux_file_burst_encrypt` outright fail (status=1) and silently produced false-positive successes for `linux_creds_aws_read` (heredoc collapsed) and `linux_useradd_persist` (if-block collapsed). Rewrote all three as single-line `;`-separated bash. Verified at the lab-debian execution layer.
+3. **Second re-run (operation `1fe6440a`)** — confirmed the rewrite. `linux_creds_aws_read`, `linux_useradd_persist`, and the two already-working customs all status=0. `linux_file_burst_encrypt` newly returned exit 124 (Caldera 60s link timeout), surfacing one more issue. Final fix: drop the loop's `sleep 2` to `sleep 1` and add `timeout: 120` on the executor. Re-uploaded.
 
 ### Why coverage stayed at 0/17 (the unrelated constraint)
 
@@ -83,10 +89,11 @@ This is the pre-existing Phase 16.9 constraint: *"Docker Desktop on Windows can'
 This is **not Phase 21.5 territory**. Lifting it is a separate phase (Phase 21.6 candidate):
 
 - **Option A (cheap):** Inject synthetic audit records during Caldera ops. Add a sidecar that watches Caldera's `chain[].plaintext_command` and writes auditd-shaped lines to `audit.log` for each. Preserves the Windows-friendly stack but only proves the *parser → detector* path, not the kernel → parser path.
-- **Option B (correct):** Run lab-debian on a Linux host (WSL2 with `--privileged`, or a small dedicated VM). Real auditd, real execve coverage, no fakes. Costs portability — operator's daily-driver Lenovo can do it but requires booting WSL2 or the VM each time.
-- **Option C (deferred):** Accept that this scorecard runs on Linux only. Document the Windows path as "develop here, validate on Linux." Defer until somebody else needs the scorecard.
+- **Option B (cheaper-than-expected):** Add `cap_add: [AUDIT_CONTROL, AUDIT_READ]` to `lab-debian` in `infra/compose/docker-compose.yml`. **Direct test during this session:** auditd is already installed in lab-debian (1:3.0.9-1). Running `/sbin/auditd` starts it, but `auditctl -a always,exit -F arch=b64 -S execve` returns `Operation not permitted` because the container lacks `CAP_AUDIT_CONTROL`. The kernel is `6.6.87.2-microsoft-standard-WSL2` which *does* have CONFIG_AUDIT compiled in (the `DAEMON_START` log line in `audit.log` proves the netlink socket exists). So this might Just Work with a one-line compose-file change. Cheapest possible fix if it does.
+- **Option C (correct):** Run lab-debian on a real Linux host (a small dedicated VM, or WSL2 with the audit netlink fully exposed). Most rigorous but loses the Docker-Desktop-on-Windows convenience.
+- **Option D (deferred):** Accept that this scorecard runs on Linux only. Document the Windows path as "develop here, validate on Linux." Defer until somebody else needs the scorecard.
 
-The decision is for the operator, not Phase 21.5.
+**Recommendation:** Try Option B first (10-second compose-file edit + one stack restart). If it works, great. If `auditctl` still returns `Operation not permitted` after the cap_add, fall back to Option A or C. The decision is for the operator, not Phase 21.5.
 
 ### Bug found and fixed during validation: scorer "deadman overwrites real status"
 
