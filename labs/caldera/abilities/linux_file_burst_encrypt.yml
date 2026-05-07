@@ -13,14 +13,16 @@
   platforms:
     linux:
       sh:
+        # NOTE: Caldera 4.2.0 strips literal newlines from a command
+        # before dispatching it to Sandcat. Multi-line YAML block
+        # scalars (`|`) get joined into one line WITHOUT separators —
+        # `mkdir -p /tmp/loot\nfor i in...` becomes `mkdir -p /tmp/lootfor`
+        # which bash parses as `mkdir -p /tmp/lootfor` (a directory named
+        # 'lootfor') and then the bare `for` clause is a syntax error.
+        # Workaround: write the entire command as a single line with
+        # explicit `;` separators so newline-stripping is a no-op. The
+        # YAML stays readable by indenting parts with " ; ".
         command: |
-          mkdir -p /tmp/loot
-          for i in $(seq 1 30); do
-              touch "/tmp/loot/f${i}.txt"
-              mv "/tmp/loot/f${i}.txt" "/tmp/loot/f${i}.txt.encrypted"
-              sleep 2
-          done
+          mkdir -p /tmp/loot ; for i in $(seq 1 30) ; do touch "/tmp/loot/f${i}.txt" ; mv "/tmp/loot/f${i}.txt" "/tmp/loot/f${i}.txt.encrypted" ; sleep 2 ; done
         cleanup: |
-          # Strict cleanup — without this, lab-debian accumulates loot
-          # across runs and the scorecard stops being reproducible.
           rm -rf /tmp/loot

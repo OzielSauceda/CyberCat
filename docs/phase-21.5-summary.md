@@ -94,9 +94,23 @@ The first-pass re-run reported 0 covered AND many `ability-failed` rows even tho
 
 This bug existed in Phase 21's first scorer too — the headline 0/17 from Phase 21 was probably understating the rigging-rooted improvement that *would have* shown up there. We caught it now because Phase 21.5's rigging exposed enough successful executions to make the bug observable.
 
-### What still errors (6 stockpile abilities)
+### What still errors (6 abilities) — second-pass triage
 
-Caldera's `status=1` (FAILED) — almost certainly missing fact substitutions. The pattern from the README still applies: read `labs/caldera/.tmp/caldera-op-*.json` for the exact failing command, find the unsubstituted `#{trait.name}` reference, add the trait to `facts.yml`, re-run the seeder. Iterative.
+Re-reading the saved `caldera-op-6994c565-*.json`'s `plaintext_command` for each `status=1` row revealed the failures are **not** mostly fact misses (the recap doc's framing was an overgeneralization). Two distinct root causes:
+
+**Caldera 4.2.0 strips literal newlines from `plaintext_command` before dispatch.** Multi-line YAML block scalars (`|`) become single lines without separators — `mkdir -p /tmp/loot\nfor i in...` becomes `mkdir -p /tmp/lootfor` which bash parses as `mkdir -p /tmp/lootfor` (a directory named `lootfor`) followed by an unparseable bare `for` clause → status=1. This affected 1 of our customs outright (`linux_file_burst_encrypt`) and silently produced *false-positive successes* for two others (`linux_creds_aws_read` heredoc and `linux_useradd_persist` if-block — both reported status=0 but executed mangled commands). Fix: rewrote each command as a single-line `;`-separated bash with explicit comments at the YAML level explaining why. Verified by direct execution inside `lab-debian` — the rewritten forms run cleanly. Re-uploaded via the helper.
+
+**The 5 remaining stockpile failures are hardcoded literal references, not fact misses:**
+
+| Stockpile ability | Failing command | Root cause | Fix path |
+|---|---|---|---|
+| Find System Network Connections | `netstat -anto` | `-o` is a Windows flag; not valid on Linux netstat | Stockpile fork — replace with `ss -tunpl` |
+| Change User Password via passwd | `passwd ARTUser` | Literal username `ARTUser`, not `#{host.user.name}` | Stockpile fork — `#{host.user.name}` substitution |
+| Data Compressed - tar | `tar -cvzf $HOME/data.tar.gz $HOME/$USERNAME` | `$USERNAME` shell var is unset on Linux | Either set USERNAME via env or stockpile fork |
+| scp remote file copy | `scp /tmp/adversary-scp victim@victim-host:...` | Literal `victim@victim-host`, target doesn't exist | Stockpile fork or pre-create SSH config |
+| Create Systemd Service | `echo "[Unit]" > /etc/systemd/system/...` | Multi-statement command newline-collapsed by Caldera | Same newline-strip bug as our customs (stockpile YAML uses `|` block scalars) |
+
+`facts.yml` doesn't help here — the abilities don't reference `#{trait}` placeholders. Three of these need stockpile-fork work; one (Create Systemd Service) is the same Caldera 4.2.0 newline bug affecting any multi-line command. None of these are Phase 21.5 territory; they're material for Phase 21.6+ when somebody decides to broaden coverage. The pattern documented in the README ("read the failing command, find the missing trait, extend `facts.yml`") still applies *if* the failure is a real fact miss — it just turned out most weren't.
 
 ---
 

