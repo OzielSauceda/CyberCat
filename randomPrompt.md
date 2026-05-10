@@ -1,7 +1,34 @@
-I wanted to do seomthing that was unique and still not as touched on, like other peiple working on it. I was wondering would it be a good idea to taregt one of these as they are still things that modern threat detection model systems on linux are still lacking: 
+Problem
 
-1. "Living off the Land" (LotL) DetectionMost Linux intrusions (~79% in early 2026) do not use traditional malware. Attackers use legitimate, pre-installed system tools (e.g., bash, ssh, curl, python) to move laterally, elevate privileges, and exfiltrate data.The Gap: Detection models struggle to distinguish between a legitimate administrator running maintenance scripts and an attacker doing the same thing, leading to high false-positive rates.What's Needed: Behavioral analytics that focus on the context and sequence of commands rather than the tools themselves.
-2. Fileless and Memory-Resident PayloadsModern Linux threats frequently operate entirely in memory or exploit kernel-level vulnerabilities, leaving no files on the disk for scanners to analyze.The Gap: Conventional scanners rely on scanning files at rest. Fileless attacks, such as those exploiting io_uring to bypass traditional system call monitoring, can evade many current EDR (Endpoint Detection and Response) tools.What's Needed: Deeper eBPF-based monitoring that can trace activity in memory and within the kernel without relying solely on system calls.
-3. Ephemeral Workload and Container ForensicsContainers can exist for only seconds or minutes, making traditional forensic investigation, which relies on analyzing a static machine after an incident, impossible.The Gap: Detection models often lack the ability to connect events across dynamic environments (e.g., Kubernetes) to see the full "kill chain," especially when a container has already been destroyed by the time an attack is detected.What's Needed: Real-time, streaming forensics and automated "bake, scan, replace" workflows.
-4. Detection Latency and "Slow-and-Low" AttacksWhile AI is improving detection speed, many models still suffer from high latency, allowing attackers to establish persistence before detection occurs.The Gap: Attackers are using "slow-and-low" techniques—performing actions slowly over weeks to blend in with normal system behavior—which allows them to evade anomaly detection models designed to spot sudden, noisy spikes.What's Needed: Long-term behavioral profiling that can identify subtle, slow deviations from established patterns.
-5. Visibility into Kernel RootkitsLinux-native rootkits are increasingly used to hide malicious activity by hooking directly into the kernel, making it difficult for user-mode security agents to see the true state of the system.The Gap: If the kernel itself is compromised, security tools running on that kernel cannot be trusted.What's Needed: Agentless, out-of-band monitoring or immutable hardware-level, read-only baselines.
+The job failed because Redis lost connectivity during the chaos test, and the backend's EventBus consumer crashed when trying to reconnect. The key error in the logs is:
+Code
+
+EventBus consumer crashed: Error 111 connecting to redis:6379. Connection refused. — reconnecting in 2s
+EventBus reconnect failed: Error -3 connecting to redis:6379. Temporary failure in name resolution. — will retry
+
+This indicates that when Redis was killed mid-run (as intended by the test), the backend's EventBus consumer failed to handle the graceful degradation properly. The connection refused error (Error 111) followed by a DNS resolution failure (Error -3) suggests the backend isn't properly implementing the resilience pattern described in the workflow comments.
+Root Cause
+
+The test expects the backend to degrade gracefully when Redis is unavailable, but instead the EventBus consumer is crashing. According to the workflow's §A1 acceptance criteria:
+
+    The simulator's --verify post-condition must pass
+    No Python tracebacks should appear (indicating unhandled exceptions)
+    The backend should stay responsive using safe_redis with bounded socket timeouts
+
+The EventBus consumer crash violates the requirement that the backend degrades gracefully.
+Solution
+
+The EventBus consumer needs to catch Redis connection errors and implement retry logic with exponential backoff rather than crashing. Update the EventBus implementation to:
+
+    Wrap Redis connections in try-except blocks to catch ConnectionError, TimeoutError, and DNS resolution failures
+    Implement exponential backoff for reconnection attempts (starting at 2s as shown in logs, but with proper exception handling)
+    Log warnings instead of crashing when Redis is temporarily unavailable
+    Ensure the backend HTTP server remains responsive even when the EventBus consumer is disconnected from Redis
+
+The workflow comment at line 14-17 specifically mentions that safe_redis + bounded socket timeouts should prevent hanging on getaddrinfo. Verify that:
+
+    safe_redis wrapper is properly applied to all Redis operations
+    Socket timeouts are configured (typical: 5-10 seconds)
+    The EventBus consumer doesn't block the main request handling thread
+
+Check the backend's Redis initialization and EventBus consumer code to ensure exceptions are caught at the consumer loop level, not allowed to propagate and crash the service.
