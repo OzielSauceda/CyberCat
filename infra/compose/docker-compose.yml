@@ -57,7 +57,14 @@ services:
       - ./wazuh-config/config/wazuh_indexer_ssl_certs/root-ca.pem:/etc/ssl/certs/wazuh-ca.pem:ro
       # Phase 19: bind-mount detection-as-code fixtures so backend tests can
       # reach them at /app/labs/fixtures regardless of build context.
-      - ../../labs:/app/labs:ro
+      # Phase 21: read-write so `python -m labs.caldera.build_operation_request
+      # --resolve-uuids` can write *.resolved.yml sidecars next to the
+      # source profile/expectations on first run.
+      - ../../labs:/app/labs
+      # Phase 21: bind-mount docs/ so the scorer can write
+      # phase-21-scorecard.{md,json} to the host repo where the
+      # operator (and `git diff`) can see it.
+      - ../../docs:/app/docs
     depends_on:
       postgres:
         condition: service_healthy
@@ -171,10 +178,25 @@ services:
     environment:
       - WAZUH_MANAGER=wazuh-manager
       - WAZUH_REGISTRATION_PASSWORD=${WAZUH_REGISTRATION_PASSWORD:-}
+      # Phase 21: Sandcat (Caldera Linux agent) is fetched and started by
+      # entrypoint.sh only when CALDERA_URL is non-empty. Compose with
+      # --profile caldera sets these via .env; without that profile the
+      # vars are empty and Sandcat startup is skipped.
+      - CALDERA_URL=${CALDERA_URL:-}
+      - CALDERA_GROUP=${CALDERA_GROUP:-red}
     cap_add:
       - AUDIT_WRITE
       - AUDIT_CONTROL
       - NET_ADMIN
+      # NOTE: AUDIT_READ was tested in Phase 21.5 and did NOT unblock
+      # auditctl. The WSL2 kernel (6.6.x-microsoft-standard-WSL2) ships
+      # with CONFIG_AUDIT but WITHOUT CONFIG_AUDITSYSCALL — `/proc/sys/
+      # kernel/audit_enabled` is absent, the syscall-tap subsystem is
+      # not compiled in, and no capability or `--privileged` setting
+      # will produce execve events on this kernel. Real auditd events
+      # require either (a) a Linux VM with a full kernel, or (b) an
+      # eBPF-based fallback, or (c) synthetic injection. Documented in
+      # docs/phase-21.5-summary.md "Verification" section.
     volumes:
       # Share /var/log with the cct-agent so the agent can tail auth.log.
       - lab_logs:/var/log
@@ -231,6 +253,40 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # ── Tier D: Caldera adversary emulation (--profile caldera) ──────────────
+  # MITRE Caldera C2 server for ATT&CK-mapped adversary emulation against
+  # lab-debian. Default OFF; only runs with --profile caldera. See
+  # docs/decisions/ADR-0016-caldera-emulation.md.
+  #
+  # Bound to 127.0.0.1 only (CLAUDE.md §8 host-safety): the UI is reachable
+  # by the operator on the laptop and by no one else.
+  caldera:
+    build:
+      context: ../caldera
+      dockerfile: Dockerfile
+    profiles: [caldera]
+    hostname: caldera
+    environment:
+      CALDERA_API_KEY: ${CALDERA_API_KEY:-CYBERCAT_DEV_KEY_DO_NOT_SHIP}
+    ports:
+      - "127.0.0.1:8888:8888"
+    volumes:
+      - caldera_data:/usr/src/app/data
+    healthcheck:
+      # Caldera 4.2.0 has no /api/v2/health endpoint (that's 5.x). /enter
+      # is a public route that 302-redirects unauthenticated requests to
+      # /login; curl -sf accepts a 302 (only 4xx/5xx fail). Override the
+      # Host header to a name without ":port" because Caldera 4.2.0 +
+      # yarl 1.9.4 (pinned in infra/caldera/Dockerfile) is healthy on
+      # host:port traffic, but defending in depth — `Host: caldera`
+      # always works and matches the compose service name.
+      test: ["CMD-SHELL", "curl -sf -H 'Host: caldera' http://127.0.0.1:8888/enter || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 60s
+    restart: unless-stopped
+
 volumes:
   postgres_data:
   wazuh_indexer_data:
@@ -238,3 +294,4 @@ volumes:
   wazuh_manager_logs:
   lab_logs:
   cct_agent_state:
+  caldera_data:

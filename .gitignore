@@ -56,3 +56,7 @@ labs/.smoke-env
 # Next.js local env overrides (per Next.js convention)
 .env.local
 .env.*.local
+
+# Phase 21 Caldera-runner scratch dir: per-run JSON sidecars consumed
+# by the scorer. Not source-controlled.
+labs/caldera/.tmp/

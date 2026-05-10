@@ -1,0 +1,8 @@
+# The Caldera source tree is cloned at image build time inside the
+# container — never into this directory on the host. Defensive ignore in
+# case anyone runs `docker build` outside of compose and ends up with a
+# local checkout next to the Dockerfile.
+caldera/
+__pycache__/
+*.pyc
+data/

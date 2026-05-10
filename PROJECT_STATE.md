@@ -6,30 +6,195 @@ Living status document. Update as reality changes. Short, current, honest.
 
 ## ⏯ Pick up next session
 
-**Where `main` is:** `11778e3` on `origin/main`. `v1.0` tag pushed. CI + Smoke both green. Working tree carries only `randomPrompt.md` (pre-existing, not part of this session).
+**Session paused 2026-05-07.** Phase 21.5 done, 5 commits on `phase-21.5-caldera-rigging`. Stack still up unless you `docker compose down`.
 
-**Status: Phase 20 fully closed and shipped to `origin/main`.** Nothing pending on the Phase 20 work itself.
+### Status at a glance
 
-**Next up: Phase 21 — Caldera adversary emulation + coverage scorecard.** Inputs are ready:
-- The hand-curated detection-gap list lives in `docs/phase-20-summary.md` "Detection gaps" section (4 evidenced detector candidates).
-- The 2026-04-30 memory entry `project_phase22_23_thesis` captures the post-Phase-21 plan ("intent over tool name").
-- Phase 21 will run Caldera (new container in the compose stack) against `lab-debian` (existing Linux lab) and produce a systematic scorecard. Expected first-run coverage: ~10-25% (the brutal-looking number IS the deliverable; it becomes Phase 22's punch list).
+| Phase | Status | Branch | Commits |
+|---|---|---|---|
+| 19 → 20 | ✅ shipped to main | merged | tagged `v1.0` |
+| 21 (Caldera adversary emulation) | 🟡 local-only | `phase-21-caldera-emulation` | 8 |
+| 22 (LotL detection W1-W6) | 🟡 local-only | `phase-22-lotl-detection` | 1 |
+| **21.5 (Caldera rigging fixes)** | **🟡 local-only, this session** | **`phase-21.5-caldera-rigging`** | **5** |
+| 23 (UEBA) | ❌ not started | — | — |
 
-**Day-1 startup commands (when ready to start Phase 21):**
-```bash
-bash start.sh                                       # bring stack up
-git checkout -b phase-21-caldera-emulation          # branch off origin/main = 11778e3
-# then ask Claude to draft docs/phase-21-plan.md
+`origin/main` is at `cfbae8e` (post-v1.0); the three local branches diverged from there.
+
+### What Phase 21.5 actually shipped
+
+Three operator-tooling helpers under `labs/caldera/`:
+
+- `upload_custom_abilities.py` — `PUT /api/v2/abilities/{id}` for each `abilities/*.yml`, idempotent
+- `seed_fact_source.py` + `facts.yml` — `PUT /api/v2/sources/{id}` with realistic lab values
+- `build_operation_request.py` — operation payload now references `cybercat-phase21` instead of empty `basic`
+
+Plus four bug fixes caught **during validation** (not from upfront design):
+
+1. **`scorer.py` deadman-overwrites real status** — Caldera fires post-op cleanup links that often end UNTRUSTED (-3); `ran[aid] = step` later-wins was overwriting real status=0 successes. Fixed: status-priority order (0 > 1 > -3 > unknown).
+2. **Caldera 4.2.0 newline-strip** — multi-line YAML block scalars (`|`) get joined into one line *without separators* during dispatch. Killed `linux_file_burst_encrypt` outright; silently mangled `linux_creds_aws_read` (heredoc) and `linux_useradd_persist` (if-block) into false-positive status=0. Fixed: rewrote 3 customs as single-line `;`-separated bash.
+3. **60s default link timeout** — `linux_file_burst_encrypt`'s 30 × `sleep 2` loop tripped Caldera's per-link timeout once it actually ran. Fixed: `sleep 1` + `timeout: 120` on the executor.
+4. **WSL2 kernel lacks `CONFIG_AUDITSYSCALL`** — empirical dead-end, not a fix. `/proc/sys/kernel/audit_enabled` is absent inside the container. The kernel binary doesn't have execve-tap code. No `cap_add` / `--privileged` setting will produce process events on Docker Desktop on Windows. Documented and reverted the experimental cap_add change.
+
+### The validation numbers
+
+| Metric | Phase 21 baseline | After Phase 21.5 (2 cycles) | Expected after timeout fix |
+|---|---|---|---|
+| ability errors | **14** | **5** | **4** |
+| gaps (ran cleanly, no detector fired) | **3** | **11** | **12** |
+| false-negatives | 0 | 1 | 1 |
+| covered | 0 | 0 | 0 (gated by missing `CONFIG_AUDITSYSCALL`) |
+
+**9 of 14 ability errors closed.** The remaining 4 are stockpile abilities with hardcoded literals (`ARTUser`, `victim-host`, `$USERNAME`, `netstat -o` on Linux) — stockpile-fork territory, not Phase 21.5.
+
+### Three real options for next session
+
+| Option | Effort | What it gets you |
+|---|---|---|
+| **Push + PR all three branches** | ~30 min | Phase 21 → main, rebase 21.5 → main, rebase 22 → main, tag `v1.1`. Closes the local-only-branch backlog. Modifies shared GitHub state. |
+| **Build the auditd replacement** (eBPF or synthetic injection or Linux VM via Multipass) | 15 min — 2 days depending on path | Unblocks the 0/17 → real-coverage scorecard. See `docs/phase-21.5-summary.md` "Verification" for the full 4-option tree. |
+| **Move on to Phase 23 (UEBA)** | several sessions | Slow-and-low statistical baselining. Bigger scope. The validation gap stays open. |
+
+### To bring the stack back up
+
+```powershell
+cd C:\Users\oziel\OneDrive\Desktop\CyberCat
+docker compose -f infra\compose\docker-compose.yml --profile agent --profile caldera up -d
+docker compose -f infra\compose\docker-compose.yml exec -T backend alembic current   # expect: 0011 (head)
 ```
 
-**Operational reminders that bit us today (don't repeat):**
-- **Run `ruff check app/` against backend changes before pushing.** The backend dev image doesn't ship ruff; CI installs it via `[dev]` extras. The Phase 20 merge took one CI-red iteration because pytest was green locally but lint wasn't checked. Codified in `feedback_run_ruff_before_push.md` memory entry. Quickest path: `MSYS_NO_PATHCONV=1 docker run --rm -v "/c/Users/oziel/OneDrive/Desktop/CyberCat/backend:/work" -w /work python:3.12-slim bash -c "pip install ruff --quiet && ruff check app/"`.
-- **Backend image is baked, not bind-mounted** (same pattern as the long-known frontend gotcha). Any change to `backend/app/`, `backend/tests/`, or `backend/alembic/versions/` requires `docker compose -f infra/compose/docker-compose.yml build backend && docker compose -f infra/compose/docker-compose.yml up -d backend` before the change is visible inside the container.
+(Frontend may fail on port 3000 — that's a separate issue, doesn't block Caldera work.)
 
-**Optional follow-ups deferred (not blocking Phase 21):**
-- Browser-verify merge/split UI manually (smoke probes confirmed routes wire through; UI components built per dossier-token aesthetic but no human click-through yet).
-- Migrate the remaining `bg-zinc-*` references in `frontend/app/components/StatusPill.tsx` and `ProposeActionModal.tsx` to dossier tokens — out of scope for Phase 20, picked up Phase 24+ or whenever a frontend-cleanup pass happens.
-- Add `POST /v1/admin/blocked-observables` admin endpoint (operator-tooling backlog item — would unblock cleaner A2 live demos and operator drills).
+### Pickup-doc pointers
+
+- `docs/phase-21.5-summary.md` — full Phase 21.5 outcome: 3-cycle comparison table, 4-option auditd tree, file inventory
+- `docs/learning-notes.md` — durable concept reference (Caldera atomic planner entry refreshed; new entries: idempotent PUT-by-id, `CONFIG_AUDIT` vs `CONFIG_AUDITSYSCALL`, Caldera 4.2.0 newline-strip)
+- `docs/phase-19-to-22-recap.md` — **lives only on `phase-22-lotl-detection` branch**, not this one. Its "Phase 21.5 — what's planned (NOT YET BUILT)" section is now stale (we shipped + iterated). When you next visit phase-22 or do the merges, append a "what actually happened" subsection there. Outline of what to add is captured in `docs/phase-21.5-summary.md`.
+
+---
+
+## (Below this line: pre-Phase-21.5 narrative — preserved verbatim)
+
+> **Original phase-21 status (preserved, 2026-05-06):** Pipeline ran end-to-end on the operator's laptop; scorecard generated; pytest 257/257 green; nothing committed yet. Stack is up. The next task is committing the working tree as `phase-21 D4` and then planning Phase 22. **Phase 22 first, Phase 21.5 second** — that sequencing was decided this session and is captured in ADR-0016 §I.
+
+**Where `main` is:** `11778e3` on `origin/main`. `v1.0` tag pushed. Untouched.
+**Working branch:** `phase-21-caldera-emulation` — six original commits + a substantial uncommitted working tree (Day-2 4.2.0 pivot fixes + the first scorecard). Not yet pushed, not yet merged.
+
+**Stack state at session-end:** UP. Caldera 4.2.0 healthy, Sandcat enrolled in lab-debian (`paw=qwxixw`, group `red`), backend reachable, pytest green. Safe to leave running or `docker compose down` — `start.sh --profile agent --profile caldera` brings it back up.
+
+### Status: Phase 21 first scorecard run COMPLETE — 0/17 covered, 3 gap, 14 ability errors
+
+**Six original commits already on the branch:**
+- `phase-21 A` (`73b388c`) — Caldera service + Sandcat in lab-debian
+- `phase-21 B1` (`97c6dfb`) — 25-ability profile + expectations + 5 custom abilities
+- `phase-21 B2` (`a7207e0`) — `run.sh` + `scorer.py` + `build_operation_request.py`
+- `phase-21 D1` (`018c8e4`) — `smoke_test_phase21.sh`
+- `phase-21 D2` (`1fdca29`) — ADR-0016 + summary + runbook + 4 learning-notes entries
+- `phase-21 D3` (`1c5d43d`) — ruff F541 fix
+
+**Day-2 working tree (uncommitted, the pickup task):** sixteen modified/new files implementing the 5.0.0 → 4.2.0 pivot, the silent-500 yarl pin discovery, the API-key entrypoint, the dual-shape scorer, and the first scorecard itself. See ADR-0016 "Day-2 amendments" for the architectural read; full file list at the bottom of this section.
+
+**The first run actually happened, here's the result:**
+- Operation `326fde6c-fd74-...` against `cybercat-phase21-linux-baseline` adversary on Caldera 4.2.0
+- Sandcat enrolled, beaconed, executed a 20-step chain
+- 3 abilities ran cleanly with no detection (real `gap` rows: id/whoami, ps, find files)
+- 9 abilities errored mid-execution (fact-source missing or cleanup-deadman race)
+- 5 abilities never dispatched (custom IDs not in Caldera's stockpile)
+- 1 ability — sudo brute-force — ran but `py.auth.failed_burst` stayed silent (real new finding: detector is sshd-specific, sudo-source PAM failures slip past)
+
+The 0/17 is honest given current platform state; 14 of 17 are test-rigging issues (Phase 21.5), not defensive holes.
+
+### Pickup task: commit, then plan Phase 22
+
+```bash
+# 0. Confirm we're on the branch and the tree matches expectations.
+git status --short    # should show ~16 M/?? files; randomPrompt.md is unrelated, leave alone
+git -C C:/Users/oziel/OneDrive/Desktop/CyberCat log --oneline -5
+
+# 1. Stage the Phase 21 D4 changes (NOT randomPrompt.md).
+git add docs/phase-21-summary.md docs/phase-21-scorecard.md docs/phase-21-scorecard.json \
+        docs/decisions/ADR-0016-caldera-emulation.md \
+        docs/runbook.md docs/learning-notes.md \
+        infra/caldera/Dockerfile infra/caldera/entrypoint.sh \
+        infra/compose/docker-compose.yml infra/lab-debian/entrypoint.sh \
+        labs/caldera/build_operation_request.py labs/caldera/expectations.yml \
+        labs/caldera/profile.yml labs/caldera/run.sh labs/caldera/scorer.py \
+        labs/caldera/expectations.resolved.yml labs/caldera/profile.resolved.yml \
+        labs/smoke_test_phase21.sh \
+        start.sh PROJECT_STATE.md .gitignore
+
+# 2. Commit.
+git commit -m "phase-21 D4: first-run scorecard + 4.2.0 pivot fixes
+
+The first scorecard run uncovered nine separate Caldera-side issues
+that needed patching before the pipeline produced meaningful data.
+All baked in. See ADR-0016 'Day-2 amendments' for the architectural
+read and docs/phase-21-summary.md for the row-by-row scorecard read.
+
+Phase 22 first, Phase 21.5 second — see ADR-0016 §I."
+
+# 3. PAUSE for operator review. Do NOT push, do NOT merge into main, do NOT tag.
+#    Phase 22 plan comes next session, then Phase 21.5 after Phase 22 ships.
+```
+
+### Risks for the commit / next session
+
+- **`randomPrompt.md` is unrelated; do not include it.** Carried in from before this session, not Phase 21 work.
+- **The two `.resolved.yml` sidecars are arguable.** They're regenerable but they record the working pin against Caldera 4.2.0 stockpile UUIDs. Committed = visible drift signal when Caldera bumps; not committed = clean repo, must re-resolve every clone. Recommended: **commit them**. ADR-0016 amendment §I justifies this.
+- **`labs/caldera/.tmp/` is gitignored** as of this session. Don't commit run-by-run scratch JSONs.
+
+### Phase 22 plan (next-session work)
+
+Per ADR-0016 §I: build detectors first, then re-validate via Phase 21.5. Four new detectors + one broadening:
+
+1. **`backend/app/detection/rules/process_lotl_chain.py`** — Linux process-chain (LotL) detector. `(parent, child, cmdline-fragment, time-window)` triples. Phase 20 Gap 1 + Phase 21 rows 1–2 evidence.
+2. **`backend/app/correlation/rules/network_indicator_compromise.py`** — promotes `py.blocked_observable_match` to incidents on `network.connection` events. Phase 20 Gap 2.
+3. **`backend/app/detection/rules/auth_baseline_unknown_source_success.py`** — per-user 90-day source-IP baseline; cold-start handling. Phase 20 Gap 3.
+4. **`backend/app/detection/rules/file_burst_detector.py`** — Redis sliding window per host. Phase 20 Gap 4.
+5. **PAM broadening** — generalize `auth_failed_burst.py` (or add sibling) to fire on any PAM auth failure, not just sshd-source. Phase 21 sudo-brute-force evidence.
+
+Each gets unit tests + scenario tests against existing Phase 20 A1–A5 fixtures. No Caldera dependency. Each detector ships as its own commit with its own test surface.
+
+### Phase 21.5 (deferred to after Phase 22)
+
+Three workstreams to make the scorecard meaningful:
+1. **`labs/caldera/upload_custom_abilities.py`** — POST the 5 local YAML abilities to `/api/v2/abilities` so the atomic planner can dispatch them.
+2. **Caldera fact source** for the 9 `ability-failed` rows — POST a fact source via `/api/v2/sources` with realistic lab values (`host.user.name=realuser`, `file.sensitive.extension=pdf`, etc.).
+3. **Cleanup deadman investigation** — figure out whether to disable cleanup links for time-window abilities or pick brute-force variants whose cleanup doesn't race the detection window.
+
+After Phase 22 detectors land + Phase 21.5 fixes the rigging, `bash labs/caldera/run.sh` becomes a regression test: covered counts climb, gap counts shrink, and any new ability we add to the profile lights up immediately.
+
+### Operational reminders carried over
+
+- **Run `ruff check app/` before pushing backend changes** — `feedback_run_ruff_before_push` memory entry. Phase 22 will touch `backend/app/`, so this becomes load-bearing again.
+- **Backend image is baked, not bind-mounted** — `feedback_frontend_rebuild` (same pattern). Phase 22 detector code requires `docker compose build backend` after edits.
+- **Don't `--no-verify`, don't add Co-Authored-By Claude lines** — `feedback_commit_style` memory.
+
+### Files in working tree (uncommitted)
+
+```
+M  .gitignore                              (labs/caldera/.tmp/ entry)
+M  PROJECT_STATE.md                        (this file)
+M  docs/decisions/ADR-0016-caldera-emulation.md  (Day-2 amendments §A–§I)
+M  docs/learning-notes.md                  (new entries: yarl, atomic-planner, MSYS, PAM-vs-sshd)
+M  docs/phase-21-summary.md                (real first-run data, sequencing decision)
+M  docs/runbook.md                         (Phase 21 4.2.0 working sequence)
+M  infra/caldera/Dockerfile                (4.2.0 + bookworm + websockets/yarl pins)
+?? infra/caldera/entrypoint.sh             (new: API-key injection)
+M  infra/compose/docker-compose.yml        (healthcheck → /enter, docs mount, labs:rw)
+M  infra/lab-debian/entrypoint.sh          (mkdir + retry-loop sandcat fetch)
+M  labs/caldera/build_operation_request.py (planner.id, stale-adversary recreate)
+M  labs/caldera/expectations.yml           (rewritten — 17 abilities, 4.2.0 slugs)
+?? labs/caldera/expectations.resolved.yml  (first-run resolution sidecar)
+M  labs/caldera/profile.yml                (rewritten — 17 abilities, 4.2.0 slugs)
+?? labs/caldera/profile.resolved.yml       (first-run resolution sidecar)
+M  labs/caldera/run.sh                     (POST /report, URL-encode +, limit=200, paths)
+M  labs/caldera/scorer.py                  (dual-shape report extractor)
+M  labs/smoke_test_phase21.sh              (4.2.0 endpoints, beacon-log T2)
+M  start.sh                                (CALDERA_URL auto-provision)
+?? docs/phase-21-scorecard.md              (deliverable)
+?? docs/phase-21-scorecard.json            (deliverable)
+M  randomPrompt.md                         (UNRELATED — exclude from commit)
+```
 
 ---
 

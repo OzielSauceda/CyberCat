@@ -1,0 +1,79 @@
+# labs/caldera/profile.yml — CyberCat Phase 21 baseline adversary profile.
+#
+# Loaded by build_operation_request.py at run time. The python helper
+# POSTs the resulting adversary definition to /api/v2/adversaries
+# (idempotent — checks existence first by name) and returns the
+# adversary_id used in the /api/v2/operations payload.
+#
+# atomic_ordering is the *intended* execution order. Stockpile entries
+# carry the slug `STOCKPILE:<executor>:<platform>:<slug>` and are
+# resolved to concrete Caldera UUIDs by `build_operation_request.py
+# --resolve-uuids` against /api/v2/abilities. Custom entries carry the
+# local id from abilities/<id>.yml.
+#
+# When you bump CALDERA_VERSION in infra/caldera/Dockerfile, re-run the
+# UUID resolver and re-verify the slugs against the new release —
+# Stockpile rotates UUIDs and renames abilities across major releases.
+# The slugs below are calibrated against Caldera 4.2.0's stockpile.
+
+name: cybercat-phase21-linux-baseline
+description: |
+  CyberCat Phase 21 baseline adversary. Curated against Caldera 4.2.0
+  stockpile to exercise the ATT&CK techniques our Phase 20 scenarios
+  touched, so the resulting coverage scorecard maps cleanly to the
+  documented detection gaps and feeds Phase 22 detector design.
+
+# 17 abilities (12 Stockpile + 5 custom). Calibrated 2026-05-05 against
+# Caldera 4.2.0; 8 of the original 25 placeholders had no equivalent
+# ability in 4.2.0's stockpile and were dropped rather than substituted
+# with unrelated content. See docs/phase-21-summary.md for the full
+# delta.
+atomic_ordering:
+  # T1059.004 — Bash recon (id, whoami)
+  - STOCKPILE:sh:linux:identify-active-user           # 1. id / whoami
+
+  # T1057 — Process discovery
+  - STOCKPILE:sh:linux:find-user-processes            # 2. process listing
+
+  # T1018 — Remote system discovery
+  - STOCKPILE:sh:linux:find-system-network-connections # 3. network conn enum
+
+  # T1003.008 — /etc/passwd read
+  - STOCKPILE:sh:linux:access-etc-passwd-local         # 4. /etc/passwd
+
+  # T1083 — File and directory discovery
+  - STOCKPILE:sh:linux:find-files                      # 5. find /home
+
+  # T1021.004 — SSH lateral movement (custom)
+  - linux_lateral_ssh                                  # 6. sshd→bash→ssh
+
+  # T1105 — Ingress tool transfer (custom)
+  - linux_curl_pipe_sh                                 # 7. curl|sh
+
+  # T1110.001 — Brute force (covered)
+  - STOCKPILE:sh:linux:sudo-brute-force-debian         # 8. sudo brute
+
+  # T1078 — Valid accounts (gap: clean cred theft)
+  - linux_creds_aws_read                               # 9. AWS creds read
+
+  # T1486 — Encrypted for impact (custom)
+  - linux_file_burst_encrypt                           # 10. file rename burst
+
+  # T1098 — Account manipulation (custom + Stockpile)
+  - linux_useradd_persist                              # 11. useradd backdoor
+  - STOCKPILE:sh:linux:change-user-password-via-passwd # 12. passwd change
+
+  # T1546.003 — Cron persistence
+  - STOCKPILE:sh:linux:cron-add-script-to-etc-cron-d-folder # 13. cron
+
+  # T1070.003 — Indicator removal
+  - STOCKPILE:sh:linux:clear-bash-history              # 14. history wipe
+
+  # T1560.001 — Archive collected data
+  - STOCKPILE:sh:linux:data-compressed-nix-tar-folder-or-file # 15. tar loot
+
+  # T1048.002 — Exfil over alt protocol (scp)
+  - STOCKPILE:sh:linux:scp-remote-file-copy-push       # 16. scp exfil
+
+  # T1543.002 — Systemd persistence
+  - STOCKPILE:sh:linux:create-systemd-service          # 17. systemd unit

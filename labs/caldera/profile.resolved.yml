@@ -1,0 +1,28 @@
+name: cybercat-phase21-linux-baseline
+description: 'CyberCat Phase 21 baseline adversary. Curated against Caldera 4.2.0
+
+  stockpile to exercise the ATT&CK techniques our Phase 20 scenarios
+
+  touched, so the resulting coverage scorecard maps cleanly to the
+
+  documented detection gaps and feeds Phase 22 detector design.
+
+  '
+atomic_ordering:
+- c0da588f-79f0-4263-8998-7496b1a40596
+- 3b5db901-2cb8-4df7-8043-c4628a6a5d5a
+- 638fb6bb-ba39-4285-93d1-7e4775b033a8
+- 13c2fcf67b344d42cd9dca8b9a310cdc
+- 90c2efaa-8205-480d-8bb6-61d90dbaf81b
+- linux_lateral_ssh
+- linux_curl_pipe_sh
+- e05bc86fbf7221f09ec13113f1292a15
+- linux_creds_aws_read
+- linux_file_burst_encrypt
+- linux_useradd_persist
+- 0e5730f670555b9dba829f3d90cbd445
+- da912f911c137cb52199c830f00a0da5
+- 3f465c72d351789eda3a553334fa43f3
+- b87adfc0c92e77845da477f44a4d1944
+- 6cbeb1957c44509a939fa6828fce66b6
+- 5cf8270fb03a94b5ad786032a625b1ac

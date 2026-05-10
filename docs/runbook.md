@@ -782,6 +782,104 @@ In the UI, both flows live on the incident detail page: "Merge into…"
 and "Split…" buttons in the header. Split mode renders a checkbox per
 event row in the timeline.
 
+## Running the coverage scorecard (Phase 21)
+
+Drives a MITRE Caldera operation against `lab-debian` and produces a
+markdown + JSON scorecard at `docs/phase-21-scorecard.{md,json}`. See
+`docs/decisions/ADR-0016-caldera-emulation.md` and
+`labs/caldera/README.md` for the full design.
+
+> **Pin note (2026-05-06):** Caldera is pinned to **4.2.0** in
+> `infra/caldera/Dockerfile` (5.0.0 needs a hand-run `npm run build`
+> for the `magma` Vue 3 UI; we don't ship Node.js in the image). The
+> Dockerfile also pins `websockets<14`, `yarl<1.10`, and the
+> `python:3.11-slim-bookworm` base. Each pin has a real bug behind it
+> — read the ADR-0016 "Day-2 amendments" section before bumping any
+> of them.
+
+```bash
+# 1. Bring up CyberCat with both --profile agent and --profile caldera.
+#    First run: start.sh provisions CALDERA_API_KEY + CALDERA_URL and
+#    recreates the caldera service. Allow ~60s for Caldera's
+#    start_period to elapse.
+bash start.sh --profile agent --profile caldera
+
+# 2. (First run only — re-run after every CALDERA_VERSION bump.)
+#    Resolve Stockpile ability UUIDs by querying /api/v2/abilities.
+#    Writes labs/caldera/{profile,expectations}.resolved.yml sidecars.
+#    Run inside the backend container so it picks up PyYAML (the
+#    script's hand-rolled YAML fallback can't parse multi-line
+#    quoted strings; PyYAML produces clean output).
+KEY=$(grep '^CALDERA_API_KEY=' infra/compose/.env | cut -d= -f2)
+docker compose -f infra/compose/docker-compose.yml exec -T \
+    -e CALDERA_API_KEY="$KEY" backend \
+    python -m labs.caldera.build_operation_request --resolve-uuids \
+        --caldera http://caldera:8888
+
+# 3. Drive the full curated profile and produce the scorecard.
+#    Total runtime: ~15-25 minutes for the 17-ability profile (Caldera
+#    4.2.0's atomic planner waits for each ability's beacon-cycle).
+bash labs/caldera/run.sh
+
+# 4. Read the result. The headline number IS the deliverable.
+less docs/phase-21-scorecard.md
+
+# 5. Smoke green to confirm the loop is intact end-to-end.
+#    T1+T2+T3+T5 should pass; T4 (sudo brute-force → py.auth.failed_burst)
+#    is expected to fail until Phase 22 broadens auth_failed_burst.py
+#    from sshd-only to all PAM failures.
+bash labs/smoke_test_phase21.sh
+```
+
+If `/var/log/sandcat.log` inside `lab-debian` doesn't contain a
+`Beacon (HTTP): ALIVE` line after step 1, the Sandcat fetch raced
+ahead of Caldera's `start_period`. The entrypoint's retry loop will
+re-attempt every 10s for 5 minutes; if it still fails, restart
+`lab-debian` once Caldera's healthcheck passes:
+
+```bash
+docker compose -f infra/compose/docker-compose.yml \
+    --profile agent --profile caldera up -d --force-recreate lab-debian
+```
+
+The Caldera UI is reachable at `http://127.0.0.1:8888` (login: `red` /
+`admin`, with API key `${CALDERA_API_KEY}` from `infra/compose/.env`
+— `infra/caldera/entrypoint.sh` patches it into `default.yml` at
+container start). Bound to loopback only; never to the network. Don't
+run `--profile wazuh` and `--profile caldera` simultaneously without
+bumping `~/.wslconfig` to 8 GB — the always-on + Wazuh + Caldera
+footprint exceeds the default 6 GB cap.
+
+**Known partial-coverage state of the first scorecard.** As of
+2026-05-06 the first run produces `0/17 covered, 3 gap, 14 ability
+errors`. Of the 14 errors: 5 are custom abilities not yet uploaded
+to Caldera's stockpile (Phase 21.5: `labs/caldera/upload_custom_abilities.py`),
+9 are stockpile abilities that need a Caldera fact source seeded
+with realistic targets (Phase 21.5). The 3 `gap` rows (id/whoami,
+ps, find files) are real Phase 22 detector candidates. The PAM
+brute-force miss is also a Phase 22 detector-broadening candidate.
+See `docs/phase-21-summary.md` for the full read.
+
+### Caldera/Phase-21 gotchas
+
+- **`--insecure` loads `default.yml` not `local.yml`.**
+  `infra/caldera/entrypoint.sh` sed-patches `api_key_red` /
+  `api_key_blue` so `${CALDERA_API_KEY}` is honored. Without this,
+  every scorer request gets 401 silently.
+- **`/api/v2/health` is 5.x only.** The 4.2.0 healthcheck uses
+  `/enter` (302 to `/login`).
+- **Caldera 4.2.0's `/api/v2/operations/<id>/report` is POST-only**
+  (5.x added GET). `run.sh` and any future scorer-style code should
+  POST with an empty `{}` body.
+- **`/v1/detections` `limit` caps at 200**, not 500 — server returns
+  422 and `curl -sf` swallows it silently. `run.sh` uses 200.
+- **`+00:00` in the `since=` query param needs `%2B00:00`** —
+  FastAPI's datetime parser otherwise sees a space.
+- **Git Bash on Windows path translation breaks five different
+  ways.** When invoking `docker compose exec` from the host with
+  in-container paths, prefix `//` (e.g. `--out-md //app/docs/...`)
+  to keep MSYS from mangling them.
+
 ## Regenerate the OpenAPI snapshot
 
 The backend writes `openapi.json` inside the container. Copy it to the host so the frontend codegen can read it:

@@ -45,5 +45,51 @@ fi
 # Start Wazuh agent
 service wazuh-agent start 2>/dev/null || true
 
+# Phase 21: launch Sandcat (Caldera's Linux agent) when CALDERA_URL is set.
+# Mirrors the WAZUH_MANAGER conditional pattern above. Sandcat is fetched
+# at runtime from the Caldera server's /file/download endpoint with the
+# platform/architecture/group selected via headers. Wrapped in
+# ( ... & ) || true so that a missing/unreachable Caldera (the common case
+# when --profile caldera is OFF) does not abort sshd startup.
+if [ -n "$CALDERA_URL" ]; then
+    SANDCAT_GROUP="${CALDERA_GROUP:-red}"
+    mkdir -p /opt/sandcat
+    if [ ! -x /opt/sandcat/sandcat ]; then
+        # Caldera 4.2.0's /file/download serves a precompiled or
+        # on-the-fly-Go-compiled sandcat binary. Headers select the
+        # variant: file=sandcat.go (the Go agent), platform=linux for
+        # this container's arch. lab-debian has no depends_on for the
+        # caldera service (caldera lives in its own profile), so on a
+        # fresh `start.sh --profile agent --profile caldera` we race
+        # caldera's startup. Retry up to 30 times (5 minutes) for the
+        # binary to come back non-empty before giving up. Wrapped in
+        # ( ... & ) so we don't block sshd from coming up if caldera
+        # is genuinely down.
+        ( for i in $(seq 1 30); do
+              curl -sk -X POST \
+                   -H "file:sandcat.go" \
+                   -H "platform:linux" \
+                   -o /opt/sandcat/sandcat.tmp \
+                   "${CALDERA_URL}/file/download" 2>/dev/null
+              if [ -s /opt/sandcat/sandcat.tmp ]; then
+                  mv /opt/sandcat/sandcat.tmp /opt/sandcat/sandcat
+                  chmod +x /opt/sandcat/sandcat
+                  /opt/sandcat/sandcat -server "${CALDERA_URL}" \
+                                       -group "${SANDCAT_GROUP}" \
+                                       -v >> /var/log/sandcat.log 2>&1 &
+                  exit 0
+              fi
+              rm -f /opt/sandcat/sandcat.tmp
+              sleep 10
+          done
+          echo "sandcat fetch gave up after 5 minutes" >> /var/log/sandcat.log
+        ) &
+    elif [ -x /opt/sandcat/sandcat ]; then
+        ( /opt/sandcat/sandcat -server "${CALDERA_URL}" \
+                               -group "${SANDCAT_GROUP}" \
+                               -v >> /var/log/sandcat.log 2>&1 & ) || true
+    fi
+fi
+
 # Run sshd in foreground as PID 1
 exec /usr/sbin/sshd -D

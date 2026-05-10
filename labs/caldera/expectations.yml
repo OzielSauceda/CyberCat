@@ -1,0 +1,148 @@
+# labs/caldera/expectations.yml — Phase 21 source of truth for the scorer.
+#
+# Each entry maps a Caldera ability to (a) the ATT&CK technique we claim
+# it exercises and (b) the CyberCat rule_id we expect to fire (or the
+# literal string GAP if no rule is expected).
+#
+# `id` MUST match the corresponding entry in profile.yml. Stockpile IDs
+# use the STOCKPILE:<executor>:<platform>:<slug> form and are resolved
+# at run time by build_operation_request.py --resolve-uuids.
+#
+# Schema:
+#   abilities[i].id                  — opaque ability identifier
+#   abilities[i].name                — human-readable label for the scorecard
+#   abilities[i].technique           — ATT&CK technique ID (T1xxx[.yyy])
+#   abilities[i].expected_rule_id    — CyberCat rule_id, or 'GAP'
+#   abilities[i].status              — pre-run claim: covered | partial | gap
+#   abilities[i].notes               — free text, especially for partial/gap rationale
+
+profile_name: cybercat-phase21-linux-baseline
+
+abilities:
+  - id: STOCKPILE:sh:linux:identify-active-user
+    name: identify active user (id / whoami)
+    technique: T1059.004
+    expected_rule_id: GAP
+    status: gap
+    notes: "Linux sh exec — process_suspicious_child is Windows-only (Gap 1)."
+
+  - id: STOCKPILE:sh:linux:find-user-processes
+    name: process listing (find user processes)
+    technique: T1057
+    expected_rule_id: GAP
+    status: gap
+    notes: "No process-discovery detector exists — Phase 22 input."
+
+  - id: STOCKPILE:sh:linux:find-system-network-connections
+    name: network connection enumeration
+    technique: T1018
+    expected_rule_id: GAP
+    status: gap
+    notes: "No remote-system-discovery detector — Phase 22 input."
+
+  - id: STOCKPILE:sh:linux:access-etc-passwd-local
+    name: /etc/passwd read (local)
+    technique: T1003.008
+    expected_rule_id: GAP
+    status: gap
+    notes: "Credential-discovery file read undetected — Phase 22 input."
+
+  - id: STOCKPILE:sh:linux:find-files
+    name: filesystem enumeration (find files)
+    technique: T1083
+    expected_rule_id: GAP
+    status: gap
+    notes: "No file-discovery detector — Phase 22 input."
+
+  - id: linux_lateral_ssh
+    name: SSH lateral pivot (sshd → bash → ssh)
+    technique: T1021.004
+    expected_rule_id: GAP
+    status: gap
+    notes: "Linux process-chain undetected (Gap 1, A1 evidence)."
+
+  - id: linux_curl_pipe_sh
+    name: curl | sh persistence
+    technique: T1105
+    expected_rule_id: GAP
+    status: gap
+    notes: "Download-and-execute pattern undetected (Gap 1, A1+A2 evidence)."
+
+  - id: STOCKPILE:sh:linux:sudo-brute-force-debian
+    name: SUDO brute-force
+    technique: T1110.001
+    expected_rule_id: py.auth.failed_burst
+    status: covered
+    notes: |
+      Match to backend/app/detection/rules/auth_failed_burst.py.
+      Threshold: 4 failures within 60s windowed by user. Stockpile's
+      sudo-brute-force-debian repeatedly invokes `sudo` with bad
+      passwords; sshd/PAM logs the failures the same way ssh login
+      failures are logged.
+
+  - id: linux_creds_aws_read
+    name: clean cred-theft + AWS creds read + login from new IP
+    technique: T1078
+    expected_rule_id: GAP
+    status: gap
+    notes: |
+      Reads /home/realuser/.aws/credentials, exfils via curl, then logs
+      in cleanly from a brand-new IP. No preceding failures, so
+      auth_anomalous_source_success stays silent (Gap 3). Phase 22
+      candidate: auth_baseline_unknown_source_success.
+
+  - id: linux_file_burst_encrypt
+    name: file-burst rename (30× .encrypted in 60s)
+    technique: T1486
+    expected_rule_id: GAP
+    status: gap
+    notes: "No file-creation rate detector exists (Gap 4, A4 evidence)."
+
+  - id: linux_useradd_persist
+    name: useradd backdoor account
+    technique: T1098
+    expected_rule_id: GAP
+    status: gap
+    notes: "No account-manipulation detector — Phase 22 input."
+
+  - id: STOCKPILE:sh:linux:change-user-password-via-passwd
+    name: password change (passwd)
+    technique: T1098
+    expected_rule_id: GAP
+    status: gap
+    notes: "Same category as useradd — account manipulation undetected."
+
+  - id: STOCKPILE:sh:linux:cron-add-script-to-etc-cron-d-folder
+    name: cron persistence (/etc/cron.d/...)
+    technique: T1546.003
+    expected_rule_id: GAP
+    status: gap
+    notes: "No persistence detector — Phase 22 input."
+
+  - id: STOCKPILE:sh:linux:clear-bash-history
+    name: bash history wipe
+    technique: T1070.003
+    expected_rule_id: GAP
+    status: gap
+    notes: "No indicator-removal detector — Phase 22 input."
+
+  - id: STOCKPILE:sh:linux:data-compressed-nix-tar-folder-or-file
+    name: tarball stage (data compressed)
+    technique: T1560.001
+    expected_rule_id: GAP
+    status: gap
+    notes: "Staging-archive pattern undetected (A4 evidence)."
+
+  - id: STOCKPILE:sh:linux:scp-remote-file-copy-push
+    name: scp exfil (push)
+    technique: T1048.002
+    expected_rule_id: GAP
+    status: gap
+    notes: "No alt-protocol exfil detector — Phase 22 input."
+
+  - id: STOCKPILE:sh:linux:create-systemd-service
+    name: systemd persistence (write .service file)
+    technique: T1543.002
+    expected_rule_id: GAP
+    status: gap
+    notes: "No systemd-unit detector — Phase 22 input."

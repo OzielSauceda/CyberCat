@@ -1,0 +1,34 @@
+# Caldera server config — Phase 21 (CyberCat).
+# Loaded as conf/local.yml inside the caldera image; takes precedence over
+# conf/default.yml. Do not commit secrets here — CALDERA_API_KEY is
+# injected from infra/compose/.env at runtime via the env block.
+
+host: 0.0.0.0
+port: 8888
+
+# Plugin set is locked to what Phase 21's coverage scorecard depends on.
+# Stockpile: ATT&CK ability library. Sandcat: Linux/Windows/macOS agent.
+# Manx: reverse-shell agent (used by Stockpile abilities). Training: small
+# tutorial profile that ships with Caldera.
+plugins:
+  - access
+  - atomic
+  - compass
+  - manx
+  - response
+  - sandcat
+  - stockpile
+  - training
+
+# Auth: red-side users defined here drive the REST API. CALDERA_API_KEY
+# in the operator's .env is the bearer key for /api/v2/* calls. The
+# password fields are placeholders for the Caldera UI (laptop-only,
+# bound to 127.0.0.1).
+users:
+  red:
+    red: phase21-red-laptop-only
+  blue:
+    blue: phase21-blue-laptop-only
+
+# Default reports directory inside the data volume.
+reports_dir: /usr/src/app/data/reports

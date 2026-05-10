@@ -61,6 +61,8 @@ Each entry follows the same shape:
 - [Sigma rule format](#sigma-rule-format)
 - [MITRE ATT&CK (tactics, techniques, subtechniques)](#mitre-attck-tactics-techniques-subtechniques)
 - [Detection-as-Code (DaC)](#detection-as-code-dac)
+- [MITRE Caldera adversary emulation](#mitre-caldera-adversary-emulation)
+- [ATT&CK technique attribution (set-overlap rule)](#attck-technique-attribution-set-overlap-rule)
 
 ### Database (Postgres)
 - [ON CONFLICT DO UPDATE / DO NOTHING (upserts and idempotent inserts)](#on-conflict-do-update--do-nothing-upserts-and-idempotent-inserts)
@@ -86,12 +88,21 @@ Each entry follows the same shape:
 - [Explainability contract](#explainability-contract)
 - [Plain-language summary layer](#plain-language-summary-layer)
 - [Recommendation engine (two-level mapping)](#recommendation-engine-two-level-mapping)
+- [Fetch-on-start agent enrollment](#fetch-on-start-agent-enrollment)
+- [Transitive dependency version drift](#transitive-dependency-version-drift)
+- [Caldera atomic planner — facts, fact sources, deadman links](#caldera-atomic-planner--facts-fact-sources-deadman-links)
+- [Git Bash MSYS path translation](#git-bash-msys-path-translation)
+- [PAM authentication failure surface (sshd vs sudo vs su)](#pam-authentication-failure-surface-sshd-vs-sudo-vs-su)
+- [Idempotent PUT-by-id (REST upsert pattern)](#idempotent-put-by-id-rest-upsert-pattern)
+- [Linux kernel CONFIG_AUDIT vs CONFIG_AUDITSYSCALL](#linux-kernel-config_audit-vs-config_auditsyscall)
+- [Caldera 4.2.0 newline-strip in plaintext_command](#caldera-420-newline-strip-in-plaintext_command)
 
 ### Verification
 - [Smoke tests vs unit tests vs integration tests](#smoke-tests-vs-unit-tests-vs-integration-tests)
 - [p50 / p95 / p99 percentiles](#p50--p95--p99-percentiles)
 - [Load harness (rate, duration, transport errors)](#load-harness-rate-duration-transport-errors)
 - [Bash sourcing & shared shell libraries](#bash-sourcing--shared-shell-libraries)
+- [Coverage scorecard methodology](#coverage-scorecard-methodology)
 
 ---
 
@@ -3891,4 +3902,392 @@ The crucial property: **Phase 20 must not add detectors**. If it did, Phase 21's
 
 ---
 
-*End of entries — coverage of Phases 1–20. New concepts will be appended as they come up in future sessions; existing entries will be updated in place if a topic gets revisited in greater depth.*
+## MITRE Caldera adversary emulation
+*Introduced: Phase 21* · *Category: Detection*
+
+**Intuition:** Caldera is "Selenium for attackers" — a server that drives a small program (Sandcat) on your target machine through a scripted list of MITRE-ATT&CK-tagged commands and reports what worked. You point it at your own infrastructure to *measure* whether your detection stack notices each step.
+
+**Precise:** MITRE Caldera is an open-source adversary-emulation framework. The architecture is two pieces: a **C2 server** (the brain — a Python web app exposing a UI and REST API on port 8888) and **agents** like Sandcat (the body — small Go binaries that beacon to the C2, pull instructions, run them, return results). Operators define **adversary profiles** as ordered lists of **abilities**, where each ability is a YAML doc containing `(executor, platform, command, ATT&CK technique)`. Caldera ships ~80–150 Linux abilities in a curated bundle called **Stockpile**. An **operation** is a single execution of a profile against an agent group; the operation's **report** is the per-step record (which abilities ran, what they returned, when).
+
+**How it works (under the hood):**
+
+The **agent enrollment** flow: a fresh Sandcat binary starts with `-server <CALDERA_URL> -group <name>`. It POSTs to `/beacon` with its hostname, OS, paw (a unique ID), and the group name; Caldera registers it and returns instructions for the next pulse. Sandcat then polls every N seconds (default ~3 sec). The pulse loop is HTTP long-polling with a small payload — no persistent socket required.
+
+The **operation lifecycle**:
+1. POST `/api/v2/adversaries` with the ordered ability list → adversary is registered, returns `adversary_id`.
+2. POST `/api/v2/operations` with `{adversary_id, planner_id, agent_group}` → server creates an operation, state moves to `running`.
+3. The selected **planner** (e.g., `atomic` — sequential, deterministic) decides which ability to dispatch next. On each agent's beacon, the planner returns the next ability's command.
+4. Sandcat runs the command, captures stdout/stderr/exit code, returns it on the next pulse. Caldera records this as a **step** with status (0 = success).
+5. When the planner has no more abilities to dispatch, the operation moves to state `finished`.
+6. GET `/api/v2/operations/{id}/report` returns the full per-agent step list — that's what our scorer reads.
+
+The **planner** abstraction matters because not all profiles are sequential. Caldera ships planners like `batch` (run everything in parallel), `look` (look for facts before running). For coverage scoring we use `atomic` so the order of execution matches `atomic_ordering` exactly — which makes per-ability attribution to time windows unambiguous.
+
+**Why it exists:** Hand-crafted attack scenarios (the Phase 20 simulator approach) are author-biased — you only test what you thought to test. Caldera flips this: the ability list is community-curated (MITRE + contributors), and running it gives you a *measured* coverage signal. The whole industry calls this "purple teaming" — defenders running known-attacker behavior to assess their own coverage.
+
+**Where in CyberCat:** Caldera 5.0.0 runs in `infra/caldera/` (Dockerfile pinned to upstream tag, `local.yml` with our plugin set). Compose service in `infra/compose/docker-compose.yml` (profile `caldera`, default OFF, bound to 127.0.0.1:8888 only). Sandcat fetched on start by `infra/lab-debian/entrypoint.sh` when `CALDERA_URL` is set. Adversary profile + abilities live in `labs/caldera/`. Decision rationale in `docs/decisions/ADR-0016-caldera-emulation.md`.
+
+**Where else you'll see it:** MITRE's own [`mitre/caldera`](https://github.com/mitre/caldera) repo. Atomic Red Team is a related project (similar ability YAMLs but no agent — runs from a control machine via SSH/WinRM). Commercial purple-team tools like AttackIQ, Mandiant Security Validation, and SafeBreach use the same primitive (ATT&CK-tagged abilities, agent-driven execution, coverage reporting). Most modern SOC consultancies run a Caldera-based "coverage assessment" before any rule-authoring engagement.
+
+**Tradeoffs:** Caldera's ability quality varies — some Stockpile entries assume tools that aren't installed, some run the wrong command for the technique they claim. Curating a subset (Phase 21 chose ~25 abilities) costs author time but makes the scorecard interpretable. Caldera's UI is feature-rich but `--insecure` mode is acceptable only on a private bind; deploying in a multi-user environment requires generating cert material and configuring auth properly. Stockpile UUIDs rotate across major releases — pin the version and re-resolve on bumps.
+
+**Related entries:** [MITRE ATT&CK (tactics, techniques, subtechniques)](#mitre-attck-tactics-techniques-subtechniques) · [Coverage scorecard methodology](#coverage-scorecard-methodology) · [ATT&CK technique attribution (set-overlap rule)](#attck-technique-attribution-set-overlap-rule) · [Fetch-on-start agent enrollment](#fetch-on-start-agent-enrollment)
+
+---
+
+## ATT&CK technique attribution (set-overlap rule)
+*Introduced: Phase 21* · *Category: Detection*
+
+**Intuition:** When you have an attacker action tagged "T1059" (parent) and a defender alert tagged "T1059.004" (subtechnique), are they the same thing? The answer is "close enough to count" — both name the same family. The set-overlap rule is the conservative way to encode "close enough" without going so loose that everything matches.
+
+**Precise:** Given an *ability* (the attacker action) tagged with one ATT&CK technique `target` and a *detection* (the defender alert) carrying a list of `attack_tags`, the rule treats the detection as **attributable** to the ability iff `{tag, parent(tag)} ∩ {target, parent(target)}` is non-empty for any `tag` in the detection's tags. Where `parent(X)` strips the dot-suffix: `parent("T1059.004") == "T1059"`, `parent("T1059") == "T1059"`. This rule is **symmetric** — direction doesn't matter — and **conservative** — it doesn't pull in tactic-level matches or unrelated techniques.
+
+**How it works (under the hood):**
+
+The unit test that proved it: an ability tagged `T1059` (parent technique, "Command and Scripting Interpreter") and a detection tagged `T1059.001` (sub-technique, "PowerShell") should attribute to each other. With the symmetric set-overlap rule, `target_set = {"T1059", "T1059"}` (collapses to `{"T1059"}`), `tag_set = {"T1059.001", "T1059"}`, intersection = `{"T1059"}`, non-empty → match. With a strict-equal rule, neither side equals the other → no match (false negative). With a tactic-only rule, every "execution" tag would match every "execution" ability → noise.
+
+The rule's cost: it cannot distinguish between two sibling sub-techniques (`T1059.004` vs `T1059.006` — bash vs python). For Phase 21's purpose that's fine — both are evidence of T1059 surface, and the scorecard's job is to assess detector *families*, not exact technique granularity.
+
+**Why it exists:** The straightforward implementation of "did the right rule fire?" — strict-equal on the ATT&CK ID — has a hidden assumption: that the ability author and the detector author chose the same level of specificity. They almost never do. Caldera's Stockpile ability list is more specific than CyberCat's detection-author tags. The set-overlap rule is the minimum amount of fuzz needed to handle that mismatch without over-attributing.
+
+**Where in CyberCat:** `labs/caldera/scorer.py` `_attribution_match()`. Called from `score()` per ability/rule combination. Determines whether a `GAP`-expected ability with a fired rule becomes `gap` (not attributable, the honest miss) or `unexpected-hit` (attributable, possible happy accident worth investigating).
+
+**Where else you'll see it:** Same shape appears in compliance / evidence-mapping work everywhere: NIST CSF subcategory matching, CIS Control mapping, ISO 27001 control inheritance. The general pattern is "one taxonomy is more specific than another; collapse to a common ancestor for comparison." Database systems use the equivalent for prefix index matching (`B-tree LIKE 'foo%'` is a subtree match, not strict equal).
+
+**Tradeoffs:** The conservative rule under-attributes within sibling sub-techniques. If Phase 22 needs finer attribution (e.g. PowerShell-specific detector tagged T1059.001 should NOT attribute to a bash ability tagged T1059.004), we'd swap to "match on full ID OR exact-target == exact-tag," which loses the parent/sub-technique fuzz. For a v1 coverage scorecard, the parent-collapsed rule is the right level of fuzz.
+
+**Related entries:** [MITRE ATT&CK (tactics, techniques, subtechniques)](#mitre-attck-tactics-techniques-subtechniques) · [MITRE Caldera adversary emulation](#mitre-caldera-adversary-emulation) · [Coverage scorecard methodology](#coverage-scorecard-methodology)
+
+---
+
+## Fetch-on-start agent enrollment
+*Introduced: Phase 21* · *Category: Project Pattern*
+
+**Intuition:** Don't bake an agent binary into the image that hosts it; fetch it from the C2 at container start when the env var is set. Decouples the host image from the agent's release cadence.
+
+**Precise:** A pattern where a containerized target machine's `Dockerfile` only creates the work directory (e.g. `mkdir -p /opt/sandcat`), and the `entrypoint.sh` conditionally fetches the agent binary at startup based on an env var (`if [ -n "$CALDERA_URL" ]`). The fetch is best-effort — wrapped in `2>/dev/null` and `( ... & ) || true` — so a missing/unreachable C2 (the common case when the corresponding profile isn't active) does not abort the rest of the entrypoint. The launched agent itself runs as a backgrounded child of PID 1 (sshd), so it does not block sshd's foreground exec.
+
+**How it works (under the hood):**
+
+Three properties make this pattern robust:
+
+1. **Idempotency.** The fetch checks `if [ ! -x /opt/sandcat/sandcat ]` first, so subsequent container restarts don't re-download. The agent binary is on the container's writable layer, not in the image, so it survives until `docker compose down -v`.
+
+2. **Graceful degradation.** With only `--profile agent` (no caldera), `CALDERA_URL` is empty (default in compose), the conditional is skipped entirely, and `lab-debian` boots identically to its pre-Phase-21 state. With both profiles up but Caldera not yet healthy (the 60s `start_period` race), the curl fetch fails silently and the agent isn't launched. The container's next restart picks it up.
+
+3. **Decoupled release cadence.** Bumping `CALDERA_VERSION` in `infra/caldera/Dockerfile` (the C2 server's image) does not require rebuilding `lab-debian`. The Sandcat binary served by the new Caldera is fetched at next container start; the host image is identical to before.
+
+The corresponding **anti-pattern** is baking the agent into the host image. That seems simpler at first but creates a coupling: every Caldera version bump requires rebuilding `lab-debian` (slow), and the agent's lifecycle is harder to debug because the binary's source-of-truth is hidden in image layers rather than at a clearly-named path.
+
+**Why it exists:** The Wazuh agent in `lab-debian` (Phase 8/9) is *baked* — it's installed via apt during image build, and configured at startup via env vars (`WAZUH_MANAGER`). That worked because Wazuh's release cadence is slow and we pin Wazuh 4.9.2 explicitly. Caldera releases more often and ships a custom Sandcat binary per version, so we wanted the looser coupling. After implementing it, this pattern is arguably better than the baked Wazuh approach for *both* agents — but rewriting the Wazuh path is out of scope for Phase 21.
+
+**Where in CyberCat:** `infra/lab-debian/Dockerfile:24-29` (just `mkdir -p /opt/sandcat`, no binary). `infra/lab-debian/entrypoint.sh:48-67` (conditional fetch + launch). Compose env vars at `infra/compose/docker-compose.yml` lab-debian.environment (`CALDERA_URL`, `CALDERA_GROUP`).
+
+**Where else you'll see it:** Most modern security agents (osquery, Falco, Splunk Universal Forwarder when bootstrapped via deployment server, Datadog agent installed via curl|sh) follow this pattern. Container observability agents (Sysdig, Aqua, Twistlock) generally fetch their kernel modules / userland binaries at start. Cloud-init scripts on EC2 / GCE almost always end with a `curl <bootstrap-url> | bash` step — same idea.
+
+**Tradeoffs:** A network-dependent startup is one more thing that can fail. The wrapping `|| true` and `( ... & )` mitigations are essential — without them, a Caldera outage would prevent sshd from starting and thus prevent operator triage of the Caldera outage. Logging the fetch result to `/var/log/sandcat.log` (visible in the lab_logs volume to `cct-agent`) is the durable record for "did Sandcat enroll today, yes/no."
+
+**Related entries:** [MITRE Caldera adversary emulation](#mitre-caldera-adversary-emulation) · [Pluggable telemetry adapter pattern](#pluggable-telemetry-adapter-pattern) · [Docker Compose profiles](#docker-compose-profiles)
+
+---
+
+## Coverage scorecard methodology
+*Introduced: Phase 21* · *Category: Verification*
+
+**Intuition:** A coverage scorecard is the analytics layer on top of an adversary-emulation run. For each attacker action, you record three things: did the action run, did your detection stack fire, did the right detection fire. The combinations produce a six-status enum that is much more useful than a binary "covered/not covered" because it surfaces the *interesting* failure modes (false negatives, unexpected hits) that drive the next round of detector design.
+
+**Precise:** Given a registry of `expectations` (per-ability: technique, expected_rule_id), a Caldera operation report (per-ability: status), and a detections-since-window response from the SIEM (per-detection: rule_id, attack_tags), the scorer assigns each row one of:
+
+- **covered** — ability ran, expected rule fired. The pass case.
+- **gap** — ability ran, `expected_rule_id == GAP` AND nothing attributable fired. The honest miss; goes on the Phase 22 punch list.
+- **false-negative** — ability ran, `expected_rule_id != GAP` AND that specific rule did NOT fire. Bug or brittleness; investigate before merging — the rule was supposed to be covered.
+- **unexpected-hit** — ability ran, `expected_rule_id == GAP` BUT a rule with overlapping ATT&CK tags fired. Possibly a happy accident worth promoting to "covered" in the next iteration; possibly mis-attribution worth tightening.
+- **ability-failed** — Caldera reported the ability did not execute on the agent (status != 0). Diagnostic only.
+- **ability-skipped** — ability was in `expectations.yml` but never appeared in the operation report at all. Diagnostic only — usually a UUID-resolution issue.
+
+The summary line tallies all six and surfaces a headline "covered N / total" number. **This headline is the deliverable — not a goal to maximize.** A scorecard showing "covered 2 / 25" with a clean ordered punch list is more useful than "covered 22 / 25" produced by tuning the abilities to match what already fires.
+
+**How it works (under the hood):**
+
+The scorer's three-input shape is what makes it generalize. Inputs:
+1. `expectations.yml` — author-curated, the source of truth for what *should* happen per ability.
+2. Caldera operation report (`/api/v2/operations/{id}/report`) — what Caldera observed: per-ability-per-agent status, output, time.
+3. CyberCat detections-since-window (`/v1/detections?since=<run_start>`) — what the SIEM caught during the operation's time window.
+
+The join: for each entry in `expectations.abilities`, look up the run status (skipped/failed/ok), look at the detections that fired anywhere in the run window, decide whether any of them are *attributable* to this ability (set-overlap rule on attack_tags), and pick the status. The output is a list of (ability, technique, expected, fired, status) tuples — the rows of the markdown table — plus a summary count of each status.
+
+The methodology is pluggable: replace Caldera with any other emulation engine that produces a per-ability outcome list, replace `/v1/detections` with any other SIEM's query API, and the scorer logic stays identical. That's why the scorer is ~150 lines of pure Python with no detection-stack-specific dependencies.
+
+**Why it exists:** "Did the platform detect that?" is a binary question; "did the platform detect that, and if so, was it the right rule?" is a 4-cell matrix; adding ability-failed/skipped makes it 6. Most teams stop at the binary version, which is why most coverage reports are uninformative. The six-status enum is what turns "we have 12% coverage" into "we have 12% coverage AND here are the four gaps that ate the most ability evidence AND here's the one false-negative that means a rule we thought we owned is actually broken."
+
+**Where in CyberCat:** `labs/caldera/scorer.py`. Outputs at `docs/phase-21-scorecard.md` and `docs/phase-21-scorecard.json`. Methodology documented in `labs/caldera/README.md` and `docs/decisions/ADR-0016-caldera-emulation.md`.
+
+**Where else you'll see it:** MITRE's own ATT&CK Navigator presents coverage in roughly this shape (heatmap colored by detection presence). Commercial coverage tools (AttackIQ, SCYTHE, AvocadoSec) all use a similar enum, sometimes with finer granularity (e.g. distinguishing "alerted" from "alerted with the wrong severity"). The pattern shows up outside security too — feature-flag rollout dashboards usually show a similar (covered/gap/unexpected) shape per cohort.
+
+**Tradeoffs:** The enum is opinionated — `unexpected-hit` could be split into "unexpected-but-correct" and "unexpected-and-wrong" if we had the human review bandwidth. We don't, so we collapse to one bucket and rely on the operator to read the row notes for context. The "ability-skipped" bucket is mostly noise (UUID resolution issues) but keeping it surfaces silently-broken UUIDs that would otherwise look like gaps.
+
+**Related entries:** [MITRE Caldera adversary emulation](#mitre-caldera-adversary-emulation) · [ATT&CK technique attribution (set-overlap rule)](#attck-technique-attribution-set-overlap-rule) · [Smoke tests vs unit tests vs integration tests](#smoke-tests-vs-unit-tests-vs-integration-tests) · [Pre-Phase-22 measurement vs guess](#pre-phase-22-measurement-vs-guess)
+
+---
+
+## Transitive dependency version drift
+*Introduced: Phase 21 (Day-2)* · *Category: Project Pattern*
+
+**Intuition:** When a library you depend on declares only a *lower bound* on its own deps (`websockets>=10.3`), pip is free to resolve to whatever is latest at install time. If those deps later change their API in incompatible ways, your code breaks not because *you* changed anything but because *the resolver* picked up new versions. The fix is upper-bound pins on transitive deps that have known API drift.
+
+**Precise:** Python's pip resolver picks the highest version satisfying the constraint set. A pin like `websockets>=10.3` (no upper bound) means "10.3 or any version after"; if the project hasn't been touched in two years, today's pip will pull `websockets-16.x` even though the project was tested against `10.x`. SemVer says major-version bumps signal breaking API changes — but most Python libraries don't follow SemVer strictly, and even when they do, the user code might reach into private internals that change in any release. The defensive move: when the upstream's pins are loose, *we* add upper bounds in our Dockerfile (`pip install ... 'websockets<14' 'yarl<1.10'`) so reproducible builds stay reproducible.
+
+**How it played out in Phase 21 (the case study):**
+
+Caldera 4.2.0's `requirements.txt` has `websockets>=10.3` (lower bound only) and an unbounded transitive `yarl` (a sub-dependency of `aiohttp`, the HTTP framework Caldera builds on). Today's pip resolved both to their latest:
+- `websockets-16.0` rewrote the server connection API in 14.0; Caldera's internal `/system/ready` probe got `1011 internal error` on every startup.
+- `yarl-1.23.0` added strict host-string validation in `_encode_host`. Any `:` in a host string is rejected. **But `aiohttp 3.8.4` still passes `request.host` (the raw `Host` header — which legitimately contains `:port` for non-default ports like `localhost:8888`) directly to `URL.build(host=...)`.** Result: every HTTP request to Caldera with a port in the Host header raised `ValueError` mid-route-resolve, aiohttp returned a generic 500 with no body, and the operator had no way to know what failed because Caldera's `setup_logger()` muted everything except `aiohttp.server` and `asyncio`.
+
+The diagnostic technique was straight from CLAUDE.md §9 "debugging as a teaching surface":
+1. **Symptom:** every HTTP route returns 500 with the body `Server got itself in trouble` (which I recognized as Python stdlib `http.server`'s default 500 message, not aiohttp's — first hint that something weird was layered).
+2. **Hypothesis A:** auth middleware broken. Tested by curl-ing `/enter` (a public route) → still 500. Ruled out.
+3. **Hypothesis B:** WebSocket startup error poisoning the app. Pinned `websockets<14`. Still 500. Ruled out (but the pin was correct for a separate reason — the `1011 internal error` startup noise went away).
+4. **Hypothesis C:** something about the request shape. Tested raw socket: `Host: localhost` → 302 (works), `Host: localhost:8888` → 500. *That* was the clue. The trigger was the `:port`.
+5. **Resolution:** disabled Caldera's logger silencing (sed-patched `setup_logger`), reproduced the bad request, captured the `ValueError: Host 'localhost:8888' cannot contain ':'` traceback. Pinned `yarl<1.10`.
+
+**Why it exists:** This is the classic cost of pip's "permissive by default" resolution policy. Other ecosystems make the opposite choice: Cargo (Rust) requires you to specify an exact version *family*, and `Cargo.lock` records the resolved tree so two `cargo build` calls produce byte-identical binaries. Python has `pip-compile` / `Poetry` / `uv` that emulate this, but a great deal of the ecosystem still ships `requirements.txt` with lower bounds only, and the burden falls on downstream consumers to add upper bounds where API drift has bitten them.
+
+**Where in CyberCat:** `infra/caldera/Dockerfile` carries the four pins (Caldera 4.2.0, websockets<14, yarl<1.10, python:3.11-slim-bookworm) with rationale comments inline. The pin set is documented again in `docs/decisions/ADR-0016-caldera-emulation.md` "Day-2 amendments" §B.
+
+**Where else you'll see it:** This is *the* universal Python build-reproducibility pain. Common examples: `urllib3` (used by `requests` — major versions break TLS handling), `cryptography` (Fernet API moves between versions), `pydantic` (v1 → v2 was famously breaking), `sqlalchemy` (1.x → 2.x async API rewrite). Outside Python: NPM's `package.json` `^` ranges have the same semantic; many projects pin `"react": "18.2.0"` exactly to avoid `^18.x` resolving to a future minor that breaks something.
+
+**Tradeoffs:** Pinning transitive deps tightly means manually bumping them when you DO want a new version (security fixes, performance improvements). The alternative — letting pip resolve fresh every build — means "today's image works, tomorrow's might not." For Phase 21's purpose (reproducible scorecard runs), tight pinning wins. For a fast-moving CI/CD environment, periodic dep-bump PRs with explicit testing is the better tradeoff.
+
+**Related entries:** [MITRE Caldera adversary emulation](#mitre-caldera-adversary-emulation) · [Docker Compose profiles](#docker-compose-profiles)
+
+---
+
+## Caldera atomic planner — facts, fact sources, deadman links
+*Introduced: Phase 21 (Day-2)* · *Updated: Phase 21.5* · *Category: Detection*
+
+**Intuition:** Caldera's "atomic planner" is the simplest of its planners — go through your ability list in order, run each on the agent, move on. But Caldera abilities aren't pure shell commands; they're parameterized templates. A `find` ability says "run `find / -name '*.#{file.sensitive.extension}'`" — Caldera substitutes the placeholder from a *fact source* before dispatching. If the fact source doesn't have that fact, the planner skips the ability silently. After every ability, the planner also fires a *deadman link* — a cleanup command — and if that runs before the ability's effects are observable (e.g. before 4 brute-force failures land in `auth.log`), you don't get the detection signal.
+
+**Precise:** Caldera's **atomic planner** iterates `adversary.atomic_ordering` left-to-right. For each ability, it evaluates the ability's `requires` block: a list of fact slots like `host.user.name` or `file.sensitive.extension`. Facts come from a **source** — a YAML doc (or a `POST /api/v2/sources` payload) listing `name: value` pairs. The default source `basic` ships empty. If a required fact is missing, the planner moves on to the next ability without dispatching. If facts are present, the placeholders `#{fact.name}` in the ability's `command` field are substituted and the resulting shell command is sent to Sandcat. After Sandcat reports success, the planner additionally sends a **deadman link** — a cleanup command from the ability's `cleanup` block — which runs even if the ability errors. With `auto_close: true` on the operation, the planner moves to state `finished` once the queue is empty.
+
+**How it works (under the hood):**
+
+The dispatch loop on each agent's beacon (default ~3s):
+1. Planner reads `adversary.atomic_ordering[i]` for next-unrun ability.
+2. Looks up the ability's `requires` block. Calls into the fact-source service to fill placeholders.
+3. If any fact is missing → skip this ability, advance `i`, return immediately to the agent.
+4. If all facts present → substitute, send the rendered command. Wait for Sandcat to return result on next beacon.
+5. After the result, fire the deadman cleanup command. Sandcat runs it on the next pulse.
+6. Loop until `i == len(atomic_ordering)`. Operation flips to `state: finished`.
+
+The **deadman race** is what bit Phase 21's first run. Stockpile's `SUDO Brute Force - Debian` ability does roughly:
+- `useradd ... art && su -c "<wrong-password loop>" art` (the brute-force part).
+- Cleanup: `userdel art; rm -rf /home/art`.
+
+The brute-force loop tries 5–10 wrong passwords serially over a few seconds. PAM logs each failure to `/var/log/auth.log`. CyberCat's `cct-agent` tails that file and posts events with a small batching delay. The detector `auth_failed_burst.py` has a 60-second window and a 4-failure threshold. **Timeline that races:** brute-force loop completes in ~2s (4–5 failures land in auth.log) → planner fires deadman cleanup → `userdel art` removes the user → cct-agent has just batched the events and is about to POST → detector fires → CyberCat normalizes the events, but by now the operation is `finished` and the run.sh detection-window has closed (`since=$RUN_START`, `now()` is moments ahead of when run.sh re-fetches the detections). Result: the detector might fire (or might not, depending on batch timing) but the scorer's "detections during the window" join doesn't pick it up.
+
+**Why it exists:** Caldera's design optimizes for *ability isolation* — each ability cleans up after itself so subsequent abilities run against a known state. Without strict cleanup, `lab-debian` accumulates artifacts (extra users, stray files, modified configs) and the scorecard becomes irreproducible. The deadman link is the enforcement mechanism. The cost is the time-window race we hit: detection events generated *during* the ability haven't fully propagated to the SIEM by the time the cleanup fires.
+
+**Where in CyberCat:** Atomic planner is selected at operation creation in `labs/caldera/build_operation_request.py` (`"planner": {"id": planner_id}`). Fact source name is the `--source` CLI arg, defaulting to `cybercat-phase21` (the constant `DEFAULT_SOURCE_NAME` near the top of the file). The source itself is declared in `labs/caldera/facts.yml` and uploaded by `labs/caldera/seed_fact_source.py` (PUT `/api/v2/sources/{id}`). Custom abilities (`abilities/*.yml`) are uploaded by `labs/caldera/upload_custom_abilities.py` (PUT `/api/v2/abilities/{id}`). Both helpers are idempotent — re-run after any edit. See the README "Phase 21.5 helpers" section.
+
+**Phase 21.5 outcome (2026-05-07):** the rigging halves of the failure mix are addressed. The deadman-race investigation specifically (Task 3 in the recap doc) was deferred — static analysis showed the 5 custom abilities all have explicit cleanup blocks that run *after* the agent has already emitted events, and the 9 ability-failed rows look like fact-substitution misses (`-3` UNTRUSTED for Sandcat drops, `1+` exit-code for runtime errors), not cleanup races. If the post-Phase-21.5 re-run still shows specific abilities fire-then-rollback before detection, *then* fork the brute-force ability with a `cleanup_delay_s` knob. Don't pre-build for a problem that may not materialize.
+
+**Where else you'll see it:** Atomic Red Team's `.yaml` invocations have the same fact-substitution pattern (`{{prerequisites}}`, `{{cleanup}}`). Ansible's `roles` are conceptually similar — declarative tasks with input variables, run in order, with handlers for cleanup. Make/Bazel/Nix all have build-time variable substitution. The deadman concept exists in Kubernetes Pod terminationGracePeriod (the cleanup window before forced kill).
+
+**Tradeoffs:** Strict cleanup = clean state between abilities = race-prone for time-window detectors *if the agent flush hasn't happened yet*. Relaxed cleanup = drift accumulates over a 17-ability operation. The right call depends on the detector class: state-based detectors (a user exists / a file exists) need cleanup; time-window detectors (4-failures-in-60s) need cleanup *deferred*. Caldera 4.2.0 doesn't expose a per-ability cleanup-delay knob — adding one would be a fork of the brute-force ability with `sleep N` before the cleanup line. Phase 21.5 deferred this until empirical evidence demands it.
+
+**Related entries:** [MITRE Caldera adversary emulation](#mitre-caldera-adversary-emulation) · [Coverage scorecard methodology](#coverage-scorecard-methodology) · [Fetch-on-start agent enrollment](#fetch-on-start-agent-enrollment) · [Idempotent PUT-by-id (REST upsert pattern)](#idempotent-put-by-id-rest-upsert-pattern)
+
+---
+
+## Git Bash MSYS path translation
+*Introduced: Phase 21 (Day-2)* · *Category: Project Pattern*
+
+**Intuition:** Git Bash on Windows runs Bash but it's a UNIX simulation layered on a Windows kernel. When you pass a Linux-style path like `/tmp/foo` to a Windows executable (`docker.exe`, Python's `python.exe`), Git Bash secretly rewrites the path to `C:\Users\...` first. Most of the time this is helpful. Sometimes it's catastrophic — your in-container `/app/labs/...` argument gets rewritten to `C:\Program Files\Git\app\labs\...` which doesn't exist. The fix: prefix the path with `//` (double slash) and Git Bash leaves it alone.
+
+**Precise:** Git Bash bundles MSYS2 (the runtime) and Cygwin-derived tools. By default, MSYS rewrites Linux-style paths to Windows-native form when invoking *non-MSYS* binaries (the heuristic checks the executable's PE header). Specifically, an argument starting with `/x/...` (where `x` is a single letter) gets rewritten to `X:\...`; an argument starting with `/foo` (multiple chars) gets translated by appending to the MSYS root (typically `C:\Program Files\Git`). The translation is opt-out via two mechanisms:
+- Per-command: `MSYS_NO_PATHCONV=1 some-command /linux/path` disables translation for that invocation.
+- Per-argument: prefixing with `//` (two leading slashes) tells MSYS this is a literal Linux path (not a host filesystem reference) and to leave it alone. Linux kernel collapses `//foo` to `/foo` so the receiving end sees the right path.
+
+**How it played out in Phase 21 (the case study):**
+
+Five separate path-translation traps in `labs/caldera/run.sh`:
+
+1. **`mktemp -t caldera-op-XXXXXX.json`** produces `/tmp/caldera-op-aBcDeF.json` (Bash form). Python on Windows can't open `/tmp/foo` (no such drive). Fix: use a project-local scratch dir `$REPO_ROOT/labs/caldera/.tmp/` instead of `/tmp`.
+2. **`docker compose -f "$COMPOSE_FILE"` with MSYS_NO_PATHCONV=1 prefix** mangled the compose-file path itself. The env var was applied too aggressively — both args got "preserved as Bash-form" and `docker.exe` (a Windows binary) couldn't open `/c/Users/oziel/...`. Fix: don't use `MSYS_NO_PATHCONV` here; let the compose-file path be translated normally.
+3. **`docker exec ... python -m scorer --out-md /app/docs/scorecard.md`** — the in-container path `/app/docs/scorecard.md` got rewritten to `C:/Program Files/Git/app/docs/scorecard.md` because Git Bash assumed it was a host filesystem ref. Fix: use `//app/docs/scorecard.md` (double slash). Linux kernel collapses to `/app/docs/scorecard.md` inside the container.
+4. **`docker compose ... exec lab-debian grep "..." /var/log/sandcat.log`** — same trap. The smoke test's T2 silently failed because the grep target got rewritten to `C:/Program Files/Git/var/log/sandcat.log`. Fix: `//var/log/sandcat.log`.
+5. **Python `open('$BASH_VAR')` where $BASH_VAR is a path** — even when the path *was* successfully resolved to Windows form by Bash, Python's open() sometimes interpreted Bash-form `/c/Users/...` as `C:/c/Users/...` (extra letter). Fix: pipe data through stdin instead of file-opening across the language boundary, e.g. `python3 -c "import json,sys; print(json.load(sys.stdin)['id'])" < "$VAR"`.
+
+**Why it exists:** MSYS path translation is a productivity feature for the common case — Windows users who type Bash commands wanting to invoke Windows binaries on host files. It became a sharp edge when we started orchestrating Linux containers from Bash on Windows (Docker on Windows is a Linux VM accessed via a Windows control plane), because the path semantics double-flip. The fix patterns above are well-known in the Git-Bash + Docker community but you discover them one bug at a time.
+
+**Where in CyberCat:** `labs/caldera/run.sh` uses `//app/...` for in-container paths and a project-local `$RUN_TMP="$SCRIPT_DIR/.tmp"` for host-Bash paths. `labs/smoke_test_phase21.sh` T2 uses `//var/log/sandcat.log`. The pattern is documented in `docs/runbook.md` "Phase 21 gotchas" section.
+
+**Where else you'll see it:** The same trap exists in WSL2 ↔ Windows file sharing (`/mnt/c/...` is the WSL view of the Windows filesystem; native Linux paths inside the WSL distro are different). In Docker Desktop's bind mount specs, Windows-style paths (`C:\Users\foo`) get auto-translated to Linux-style for the container. Cygwin (Git Bash's parent) has the same behavior. PowerShell's path handling is a separate world entirely (no slash translation).
+
+**Tradeoffs:** Disabling translation per-command (`MSYS_NO_PATHCONV=1`) is too aggressive — it breaks paths that *should* be translated. The double-slash trick is per-argument and surgically correct, but cosmetically ugly (`//app/...` looks wrong). The ugliness is the tax for portability. Alternative: switch to PowerShell entirely (no slash translation), but then we lose Bash idioms like `$()` and `$(...)`.
+
+**Related entries:** [Bash sourcing & shared shell libraries](#bash-sourcing--shared-shell-libraries) · [Docker Compose profiles](#docker-compose-profiles)
+
+---
+
+## PAM authentication failure surface (sshd vs sudo vs su)
+*Introduced: Phase 21 (Day-2)* · *Category: Telemetry sources*
+
+**Intuition:** On Linux, `ssh`, `sudo`, and `su` all check passwords through the same module — PAM. PAM writes a failure event to `/var/log/auth.log` regardless of which command initiated the check. But the events look slightly different — different syslog tag, different `authentication failure` line shape — and a detector that keys on the *tag* (e.g. only on `sshd:`) will miss failures from sudo or su. The fix: key on PAM's universal `authentication failure` substring, not on the surface program.
+
+**Precise:** PAM (Pluggable Authentication Modules) is the Linux subsystem that programs call to verify credentials. `pam_authenticate()` is the entry point; it consults config in `/etc/pam.d/<service>` (e.g. `/etc/pam.d/sshd`, `/etc/pam.d/sudo`) and returns `PAM_SUCCESS` or a failure code. Every PAM module, including the common-auth chain, logs to syslog with the *calling program's* identifier as the tag (`sshd`, `sudo`, `su`, `login`). Failed auths produce a syslog line containing the substring `authentication failure` plus structured key=value fields:
+- `rhost=<source-ip>` (sshd-only — set by sshd from the TCP peer)
+- `user=<target-username>` (always)
+- `tty=<tty>` (sudo, su, login)
+- `ruser=<requesting-user>` (sudo: who's trying to escalate)
+
+**How the surfaces differ:**
+
+```
+# sshd failure (CyberCat's covered case):
+Apr 30 04:23:17 lab-debian sshd[1234]: pam_unix(sshd:auth): authentication failure;
+  logname= uid=0 euid=0 tty=ssh ruser= rhost=10.0.0.42 user=alice
+
+# sudo failure (Phase 21's miss):
+Apr 30 04:24:01 lab-debian sudo[5678]: pam_unix(sudo:auth): authentication failure;
+  logname=art uid=1001 euid=0 tty=/dev/pts/0 ruser=art rhost=  user=art
+
+# su failure (similar):
+Apr 30 04:24:09 lab-debian su[5680]: pam_unix(su:auth): authentication failure;
+  logname=art uid=1001 euid=0 tty=/dev/pts/0 ruser=art rhost=  user=art
+```
+
+CyberCat's `auth_failed_burst.py` detector keys on `sshd[<pid>]:` as the syslog tag and extracts `rhost=` to bucket failures by source IP. Sudo failures don't have `sshd[...]:` and don't have an `rhost=` (they're local) — the detector skips them entirely. Phase 21's Caldera-driven `SUDO Brute Force - Debian` ability generated 5+ sudo PAM failures within seconds, but our detector saw zero of them.
+
+**Why it exists:** sshd's syslog tag is the natural key for "external SSH brute force" detection — that was Phase 14's original use case. The detector was scoped to that surface and tested against scenarios that all used sshd. The narrowness was invisible until Phase 21's Caldera profile chose a sudo-source brute-force ability instead, which is just as much a brute-force technique (T1110.001) but produces a different syslog shape. PAM is the universal substrate; keying on it instead of the surface program is the better detector design.
+
+**Where in CyberCat:** `backend/app/detection/rules/auth_failed_burst.py` (current narrow sshd-keyed detector) → Phase 22 will broaden it. The cct-agent already tails `/var/log/auth.log` and parses sshd lines; expanding the parser to recognize sudo/su/login PAM lines is the cct-agent-side work item.
+
+**Where else you'll see it:** Every Linux SIEM detector for "brute force" needs to make this decision. Splunk's CIM `Authentication` data model abstracts the source program away (`app=sshd` is a field, not a primary key). Wazuh's auth rules have separate decoder chains for sshd / sudo / su but a unified detection rule (`Multiple authentication failures`) that fires on any of them. CrowdStrike's ATT&CK content for T1110 covers both surfaces. AIX, Solaris, and BSDs use the same PAM model and the same fix applies.
+
+**Tradeoffs:** Broadening the detector raises false-positive risk — PAM failures from cron's `pam_unix(cron:account):` (a benign reload condition) or from one-off `sudo` mistakes by the operator are not attacks. Phase 22's broadening will need a *source-aware threshold* — sshd brute force is "≥4 failures in 60s from one rhost"; sudo brute force should be "≥4 failures in 60s for one ruser regardless of source." Different keys, same threshold shape.
+
+**Related entries:** [sshd auth events](#sshd-auth-events) · [auditd (EXECVE / SYSCALL / EOE)](#auditd-execve--syscall--eoe) · [Coverage scorecard methodology](#coverage-scorecard-methodology) · [MITRE Caldera adversary emulation](#mitre-caldera-adversary-emulation)
+
+---
+
+## Idempotent PUT-by-id (REST upsert pattern)
+*Introduced: Phase 21.5* · *Category: Project Pattern*
+
+**Intuition:** When you want a script you can re-run safely without first asking "does this already exist?", design (or use) a REST endpoint that takes the resource's identifier in the URL path and accepts `PUT`. The server treats the call as "create-or-replace at this key." Same effect as `ON CONFLICT DO UPDATE` in SQL or `redis SET` (always overwrites), but at the HTTP layer.
+
+**Precise:** Per RFC 9110 §9.3.4, `PUT` "requests that the state of the target resource be created or replaced with the state defined by the representation enclosed in the request message content." This is in deliberate contrast to `POST` (server picks the URL of the newly-created resource). PUT-by-id requires the client to own the resource's identifier — so the client picks `linux_lateral_ssh` as an ability_id, the YAML's `id:` field is the source of truth, and the URL path `/api/v2/abilities/linux_lateral_ssh` is the addressable handle. Idempotency follows directly from the spec: PUT N times with the same body has the same observable effect as PUT once. POST N times creates N resources.
+
+**Why it exists:** Without PUT-by-id, "ensure resource X exists with this content" requires a *search → diff → create-or-update* dance:
+
+```python
+existing = GET /api/v2/things?name=foo
+if existing:
+    if existing.body != desired:
+        DELETE /api/v2/things/{existing.id}
+        POST /api/v2/things  # create
+else:
+    POST /api/v2/things
+```
+
+That dance has TOCTOU (time-of-check-to-time-of-use) hazards under concurrent callers — between the GET and the POST, another caller can create the same resource. It's also verbose and easy to get wrong. PUT-by-id collapses the whole sequence to one call: `PUT /api/v2/things/foo` with the desired body, server figures out the rest.
+
+**Where in CyberCat:**
+
+- `labs/caldera/upload_custom_abilities.py` — `_caldera_request(url, key, method="PUT", payload=payload)` against `/api/v2/abilities/{ability_id}`. Re-running after editing `abilities/*.yml` simply replaces the prior version.
+- `labs/caldera/seed_fact_source.py` — `PUT /api/v2/sources/{source_id}`. Same idiom for the fact source.
+- Compare `labs/caldera/build_operation_request.py:225` (the older adversary-upsert dance: search by name → delete-and-recreate if stale → create from scratch). That code predates Phase 21.5 and works, but it's three round-trips with race-window semantics. The Phase 21.5 helpers are one round-trip with idempotent-by-id semantics. Both end up at the same place; the new pattern is cleaner.
+
+**Where else you'll see it:**
+
+- **Kubernetes**: `kubectl apply -f thing.yaml` defaults to PUT-style server-side apply for known kinds. The resource's `metadata.name` is the ID.
+- **AWS S3**: `PUT /<bucket>/<key>` overwrites by key, no questions asked.
+- **Stripe**: most resources support both `POST /v1/customers` (create with new ID) and `POST /v1/customers/{id}` (idempotency-key-style upsert with client-chosen ID via the `Idempotency-Key` header).
+- **Terraform**: the entire reconciliation loop is this pattern at infrastructure scale — declared state in HCL + reconcile to match.
+- **Caddy / Traefik dynamic-config APIs**: PUT-by-id for live route updates without rebuild.
+
+**Tradeoffs:**
+
+- *Client owns the ID space.* You have to pick stable IDs that won't collide. In our case the YAML `id:` field is the source of truth — that's a deliberate choice, not free.
+- *Last-write-wins is the only conflict model.* If two operators race on the same `linux_lateral_ssh` ability with different bodies, one body silently overwrites the other. That's fine for our solo-operator case; for collaborative APIs you layer optimistic concurrency control on top via `If-Match: <etag>`.
+- *Server has to support it.* Caldera 4.2.0 does (`PUT /api/v2/abilities/{ability_id}` is a documented route). Some legacy APIs only expose POST-create + PATCH-update; for those you fall back to the search-and-update dance.
+- *Cosmetic but real:* PUT-by-id requires the client to URL-encode the ID. Caldera's IDs are alphanumeric-with-dashes, so this never bites us — but if you used a UUID or a slug with `/` in it, you'd need encoding.
+
+**Related entries:** [ON CONFLICT DO UPDATE / DO NOTHING (upserts and idempotent inserts)](#on-conflict-do-update--do-nothing-upserts-and-idempotent-inserts) · [SETNX (set-if-not-exists) for dedup](#setnx-set-if-not-exists-for-dedup) · [Caldera atomic planner — facts, fact sources, deadman links](#caldera-atomic-planner--facts-fact-sources-deadman-links)
+
+---
+
+## Linux kernel CONFIG_AUDIT vs CONFIG_AUDITSYSCALL
+*Introduced: Phase 21.5* · *Category: Systems*
+
+**Intuition:** "Has audit support" sounds like one feature, but it's actually two separate kernel build-time options. `CONFIG_AUDIT` is the *framework* — the netlink socket, the daemon-protocol plumbing, the `audit.log` writer. `CONFIG_AUDITSYSCALL` is the *thing that actually traps every system call* (execve, open, etc.) and turns it into an event. A kernel with `CONFIG_AUDIT=y` but `CONFIG_AUDITSYSCALL=n` will let `auditd` start cleanly, write `DAEMON_START` lines, and *generate zero process events*. You can spend hours wondering why the agent is silent before realizing the kernel was simply built without the syscall-tap.
+
+**Precise:** Linux's audit subsystem has two independent build options (see `kernel/Kconfig`):
+
+- **`CONFIG_AUDIT=y`** enables the base framework — the `AF_NETLINK` family `NETLINK_AUDIT` socket, the user-space daemon protocol, the `auditctl -s` status path, the `DAEMON_START` / `DAEMON_END` log records.
+- **`CONFIG_AUDITSYSCALL=y`** enables the per-syscall hook (the `audit_syscall_entry` / `audit_syscall_exit` calls inserted into every `SYSCALL_DEFINE*` macro), the rule-matching engine that decides whether to emit a `SYSCALL` / `EXECVE` record, and the `/proc/sys/kernel/audit_enabled` sysfs entry.
+
+The two are *independent* — you can have the framework without syscall tracing. The clean diagnostic: check whether `/proc/sys/kernel/audit_enabled` exists. If it does, the kernel has `CONFIG_AUDITSYSCALL=y` and `auditctl -a` should work (modulo capabilities). If it does not exist, no rule will ever fire because the trap points aren't in the kernel binary at all.
+
+**Why it exists:** `CONFIG_AUDITSYSCALL=y` adds a small per-syscall cost (a few cycles to check whether any rule matches the current syscall) even when no rules are loaded. Distros optimized for cloud / minimal kernels often disable it to shave startup time and avoid attack surface they don't need. WSL2's Microsoft-provided kernel is one such build (verified in Phase 21.5: `6.6.87.2-microsoft-standard-WSL2`).
+
+**Where in CyberCat:**
+
+- The `cct-agent`'s auditd source (`agent/cct_agent/parsers/auditd.py`) tails `/var/log/audit/audit.log`. On a kernel with `CONFIG_AUDITSYSCALL=y`, `auditd` writes `EXECVE` / `SYSCALL` records there as commands run; the agent parses them into `process.created` events.
+- On Docker Desktop on Windows, the WSL2 kernel lacks `CONFIG_AUDITSYSCALL`, so `auditd` writes only `DAEMON_*` and any synthetic / pre-baked records. **No real process events ever land**, regardless of `cap_add` (`CAP_AUDIT_CONTROL`, `CAP_AUDIT_READ`) or `--privileged` settings. `/proc/sys/kernel/audit_enabled` being absent is the smoke gun.
+- This means real Caldera-driven validation on the operator's laptop requires either (a) a Linux VM with a full kernel (Multipass on Windows is the lightest path), (b) an eBPF-based replacement that doesn't depend on the audit subsystem, or (c) synthetic injection of audit-shaped lines from outside the kernel. Phase 21.5 documented all three; choice deferred.
+
+**Where else you'll see it:**
+
+- **Container-optimized OS images** (Bottlerocket, Talos, Flatcar) often disable `CONFIG_AUDITSYSCALL` for the same minimal-footprint reason. Tools like Falco that need syscall events ship eBPF probes specifically because they can't assume audit is available.
+- **WSL1 vs WSL2:** WSL1 had no kernel of its own (translation layer); WSL2 has a real Linux kernel, but it's Microsoft's build with their config choices. Audit choices may change across WSL2 kernel updates.
+- **Cloud images** vary: Amazon Linux 2 has `CONFIG_AUDITSYSCALL=y` by default. Some hardened-Debian builds do not. Always check `/proc/sys/kernel/audit_enabled` before assuming.
+- **GKE COS / EKS Bottlerocket**: many cluster-runtime images lack syscall audit, which is why eBPF-based runtime-security tooling dominates that ecosystem.
+
+**Tradeoffs:**
+
+- *Auditd path:* low-overhead when off, mature tooling, integrates with PAM and other security subsystems out of the box. Cost: requires kernel cooperation; the rule language is fiddly; cleanup requires disabling rules carefully.
+- *eBPF path:* portable across container kernels, doesn't need `CONFIG_AUDITSYSCALL`, can attach to any tracepoint. Cost: needs a recent-ish kernel (≥4.18 for `BPF_PROG_TYPE_TRACEPOINT`), more code to write, harder to debug than reading `audit.log`.
+- *Synthetic injection:* zero kernel dependency, deterministic, ideal for tests. Cost: only validates the parser-→-detector path, not kernel-→-parser. False sense of coverage if used as the *only* validation.
+
+**Related entries:** [auditd (EXECVE / SYSCALL / EOE)](#auditd-execve--syscall--eoe) · [PAM authentication failure surface (sshd vs sudo vs su)](#pam-authentication-failure-surface-sshd-vs-sudo-vs-su) · [Tail-and-checkpoint pattern](#tail-and-checkpoint-pattern)
+
+---
+
+## Caldera 4.2.0 newline-strip in plaintext_command
+*Introduced: Phase 21.5* · *Category: Project Pattern*
+
+**Intuition:** When Caldera 4.2.0 dispatches an ability to a Sandcat agent, it strips literal newlines (`\n`, 0x0A) from the command body — but it does *not* insert any separator. A multi-line bash script becomes a single mashed-together line. `mkdir -p /tmp/loot\nfor i in $(seq 1 30); do` becomes `mkdir -p /tmp/lootfor i in $(seq 1 30); do`. Bash parses that as creating a directory named `lootfor`, then chokes on `i in $(seq 1 30); do` as a syntax error. The ability returns exit 1 even though the YAML and the API-stored form both look correct.
+
+**Precise:** Caldera 4.2.0's link-dispatch path renders an ability's `command` field by collapsing `\n` characters out of the string before passing it to the agent's executor wrapper (`bash -c "<command>"` for the Linux/sh executor). The on-disk YAML uses block scalar literals (`|`) which preserve newlines through PyYAML; the REST API (`PUT /api/v2/abilities/{id}`) accepts and stores the command with newlines intact (verified by `GET /api/v2/abilities/{id}` returning the full multi-line string). The mangling happens between *storage* and *dispatch*, in the planner's command-rendering step. The resulting `plaintext_command` field in the operation report shows the stripped form — that's the diagnostic surface.
+
+**The failure modes:**
+
+- **Hard fail (exit 1):** abilities with a `for`/`while`/`if` block where the keyword (`for`, `done`, `then`, `fi`) needs to be a separate statement. Bash treats consecutive non-separated tokens as one command and errors out.
+- **Silent miscarriage (exit 0):** abilities that look successful but executed mangled code. Example: `useradd -m -s /bin/bash backdoor || true\necho 'pw' | chpasswd` becomes `useradd -m -s /bin/bash backdoor || true echo 'pw' | chpasswd` which bash parses as `useradd ... echo backdoor:pw | chpasswd` — useradd succeeds (exit 0) but the chpasswd input is garbled and runs against useradd's exit status, not against `backdoor:pw`. The user gets created but with no password set.
+- **Survives intact:** abilities whose effective code is a single statement preceded only by comments (`#`-prefixed lines). After stripping, the comments fuse into one line that bash treats as one big comment, and the actual command line follows untouched.
+
+**Why it exists:** Speculation — looks like Caldera 4.2.0's command-rendering uses a fact-substitution step that splits/joins on newline boundaries during placeholder resolution and forgets to re-insert separators. Could also be a YAML-loading shortcut that misuses `replace('\n', '')` instead of `replace('\n', '; ')`. Not investigated upstream because Caldera 4.2.0 is a frozen pin (5.0.0 was broken — see ADR-0016).
+
+**Workaround (Phase 21.5):** rewrite custom abilities so the `command` body is a single line with explicit `;` separators between statements. The YAML stays readable via inline comments at the executor level. For heredocs (`cat <<EOF\n...EOF`), substitute `printf 'multi\\nline\\nbody\\n' >`. For if-blocks, use the single-line form `if cond ; then A ; else B ; fi`. For loops, `for i in X ; do A ; done`.
+
+**Where in CyberCat:**
+
+- `labs/caldera/abilities/linux_file_burst_encrypt.yml`, `linux_creds_aws_read.yml`, `linux_useradd_persist.yml` — all rewritten as single-line bash with explanatory YAML-level comments at the executor.
+- `labs/caldera/abilities/linux_lateral_ssh.yml`, `linux_curl_pipe_sh.yml` — left as multi-line because their effective code is a single `bash -c '...'` statement; the comment lines fuse harmlessly.
+- The diagnostic pattern: when an ability returns status=1 unexpectedly, read the saved `labs/caldera/.tmp/caldera-op-*.json` and inspect the failing step's `plaintext_command` field — if it's missing newlines, that's the bug.
+
+**Where else you'll see it:**
+
+- **Atomic Red Team's PowerShell driver** has had similar issues with newline-handling in `prerequisites` blocks across versions.
+- **Ansible's `shell:` module** *does* preserve newlines, but `command:` interprets each whitespace-separated token as a separate argument — different bug, same family ("shell semantics changed under me").
+- **Kubernetes Pod `command` arrays vs `args`** flatten differently across kubectl client versions.
+- **AWS Step Functions / Lambda's `Pass` state** — JSON-encoded multi-line strings have idiosyncratic escape handling per region/runtime version.
+
+**Tradeoffs:** Keeping abilities as single-line bash is less readable (long lines, harder to diff, inline comments cramped). Investing in a Caldera 5.x upgrade or pre-render hook is more correct architecturally. Phase 21.5 picks the cheap workaround because Caldera 4.2.0 is a frozen pin and the alternative (debugging upstream) was out of scope. If we ever upgrade Caldera, the workaround should be tested and likely removed — the YAMLs can revert to the readable multi-line form.
+
+**Related entries:** [MITRE Caldera adversary emulation](#mitre-caldera-adversary-emulation) · [Caldera atomic planner — facts, fact sources, deadman links](#caldera-atomic-planner--facts-fact-sources-deadman-links) · [Idempotent PUT-by-id (REST upsert pattern)](#idempotent-put-by-id-rest-upsert-pattern) · [Coverage scorecard methodology](#coverage-scorecard-methodology)
+
+---
+
+*End of entries — coverage of Phases 1–21.5. New concepts will be appended as they come up in future sessions; existing entries will be updated in place if a topic gets revisited in greater depth.*
